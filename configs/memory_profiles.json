@@ -15,10 +15,12 @@
         "PLAYER_BASE": "0x00549FF0",
         "PLAYER_X": "0x00551720",
         "BM_RVA": "0x00436EF0",
-        "EM_RVA": "0x00AEE0B0"
+        "EM_RVA": "0x00AEE0B0",
+        "GUI": "0x00ABAE28"
       }
     },
     "b0cc28ec904e9efce2439ad857c938b5": {
+      "spell_result_verified": true,
       "rvas": {
         "CALC_COUNT": "0xC21C00",
         "CUR_STATE": "0xC21D9C",
@@ -31,7 +33,10 @@
         "PLAYER_BASE": "0x4FF3A0",
         "PLAYER_X": "0x506AD0",
         "BM_RVA": "0x3EC2A0",
-        "EM_RVA": "0xAA1E90"
+        "EM_RVA": "0xAA1E90",
+        "GUI": "0xA6EC08",
+        "SPELL_RESULT_ACTIVE_CANDIDATE": "0x4F27B6",
+        "SPELL_RESULT_MENU_CANDIDATE": "0x3E5430"
       }
     }
   }

@@ -28,12 +28,13 @@ class DiagnosticLog:
             print(f"Diagnostic log: {self.path}", file=sys.stderr)
         return self
 
-    def emit(self, record):
+    def emit(self, record, console=True):
         line = json.dumps(record, allow_nan=False)
         if self.file:
             self.file.write(line + "\n")
             self.file.flush()
-        print(line, flush=True)
+        if console:
+            print(line, flush=True)
 
     def __exit__(self, kind, error, traceback):
         try:
@@ -47,7 +48,7 @@ class DiagnosticLog:
 def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False):
     """Report every reset and terminal event, including partially failed runs."""
     choose = make_policy(policy, seed)
-    resets = completed = failures = 0
+    resets = completed = failures = successes = classified_failures = 0
     total_frames = 0
     reason = None
     transitions = fallback_steps = 0
@@ -82,7 +83,9 @@ def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False):
                 if terminated or truncated:
                     completed += 1
                     reason = info["reason"]
-                    failures += int(reason == "death")
+                    failures += int(reason in ("death", "spell_failure"))
+                    successes += int(reason == "spell_success")
+                    classified_failures += int(reason == "spell_failure")
                     total_frames += info["elapsed_frames"]
                     emit({"event": "episode_end", "episode": episode, "steps": steps,
                           "return": episode_return, **info})
@@ -91,7 +94,7 @@ def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False):
                               "message": "Combat became quiet. Check the result screen; success is not inferred. "
                                          "Select the spell manually before starting a new run."})
                     break
-            if reason != "death":
+            if reason not in ("death", "spell_success", "spell_failure"):
                 break
     finally:
         emit({"event": "summary", "requested_episodes": episodes, "resets": resets,
@@ -99,6 +102,8 @@ def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False):
               "max_bullet_count": max_bullets, "max_dropped_bullets": max_dropped,
               "radius_fallback_steps": fallback_steps, "max_radius_fallback_count": max_fallback,
               "completed_episodes": completed, "death_or_retry_episodes": failures,
-              "unresolved_episodes": completed - failures, "success_rate": None,
+              "successful_episodes": successes, "classified_failure_episodes": classified_failures,
+              "unresolved_episodes": completed - failures - successes,
+              "success_rate": successes / completed if completed and successes + classified_failures == completed else None,
               "observed_retries": max(0, resets - 1), "completed_frames": total_frames,
               "all_requested_completed": completed == episodes, "last_reason": reason})

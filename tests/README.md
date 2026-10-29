@@ -24,6 +24,13 @@ python -m unittest discover -s tests -v
   non-finite coordinates, short/torn reads, menu skipping, and info isolation.
 - `test_attack_policy.py`: Attack direction, target filtering, boss priority,
   clearance constraints, close targets, enemy padding, and policy registration.
+- `test_menu_probe.py`: Stable-byte candidates, build/label checks, bounded
+  region reads, invalid GUI pointers, and short-read reporting.
+- `test_result_candidates.py`: Static candidate offsets, scalar decoding, and
+  unavailable-data handling. These tests do not validate candidate semantics.
+- `test_result_flow.py`: Result decoding, success/failure terminal states,
+  transitional phases, cursor-aware retries, focus loss, unresponsive input,
+  and a complete fake success-retry-failure cycle.
 
 Tests do not start the game, send real keys, or require a GPU. Passing these tests
 does not validate live addresses or the spell failure-menu default selection.

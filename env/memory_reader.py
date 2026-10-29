@@ -46,6 +46,20 @@ class Enemy:
 
 
 @dataclass(frozen=True)
+class ResultMenu:
+    active: bool
+    selection: int = 0
+    phase: int = 0
+    outcome_flag: int = 0
+
+    @property
+    def outcome(self):
+        if self.active and self.phase == 1:
+            return "success" if self.outcome_flag == 1 else "failure"
+        return None
+
+
+@dataclass(frozen=True)
 class Snapshot:
     frame: int
     scene: int
@@ -60,11 +74,13 @@ class Snapshot:
     y: float
     bullets: tuple = ()
     enemies: tuple = ()
+    result_menu: ResultMenu | None = None
 
     @property
     def running(self):
         # Zero reserve lives still means one playable life remains.
-        return self.scene == self.wanted_scene == 2 and not self.retry
+        return (self.scene == self.wanted_scene == 2 and not self.retry
+                and not (self.result_menu and self.result_menu.active))
 
     @property
     def ready(self):
@@ -82,6 +98,12 @@ def load_profile(exe_path, profiles_path=DEFAULT_PROFILES):
     try:
         entry = profiles["builds"][digest]
         addresses = {name: int(entry["rvas"][name], 0) for name in REQUIRED}
+        for optional in ("GUI", "SPELL_RESULT_ACTIVE_CANDIDATE", "SPELL_RESULT_MENU_CANDIDATE"):
+            if optional in entry["rvas"]:
+                addresses[optional] = int(entry["rvas"][optional], 0)
+        if entry.get("spell_result_verified") is True:
+            addresses["SPELL_RESULT_ACTIVE"] = addresses["SPELL_RESULT_ACTIVE_CANDIDATE"]
+            addresses["SPELL_RESULT_MENU"] = addresses["SPELL_RESULT_MENU_CANDIDATE"]
     except (KeyError, TypeError, ValueError) as exc:
         raise UnsupportedBuildError(f"Missing or incomplete memory profile: {digest}") from exc
     return digest, addresses
@@ -120,7 +142,8 @@ class MemoryReader:
             deaths = self._value("DEATHS", "<i")
             dying = bool(self._value("DYING", "<B"))
             retry = self._value("RETRY", "<B") == 255
-            playable_scene = scene == wanted == 2 and not retry
+            menu = self._result_menu() if scene == wanted == 2 else None
+            playable_scene = scene == wanted == 2 and not retry and not (menu and menu.active)
             if playable_scene:
                 state = self._read(self.addresses["PLAYER_BASE"] + 0x7898, 1)[0]
                 x, y = struct.unpack("<ff", self._read(self.addresses["PLAYER_X"], 8))
@@ -140,7 +163,7 @@ class MemoryReader:
             if deaths < 0 or state > 3:
                 raise MemoryReadError("Invalid player state or death count")
             return Snapshot(end, scene, wanted, lives, bombs, deaths, dying,
-                            retry, state, x, y, bullets, enemies)
+                            retry, state, x, y, bullets, enemies, menu)
         raise MemoryReadError("Game advanced during every sample; retry acquisition")
 
     def _bullets(self):
@@ -166,6 +189,22 @@ class MemoryReader:
                 radius = 3.0
             result.append(Bullet(slot, x, y, vx, vy, radius, state, estimated))
         return tuple(result)
+
+    def _result_menu(self):
+        if "SPELL_RESULT_ACTIVE" not in self.addresses:
+            return None
+        active = self._value("SPELL_RESULT_ACTIVE", "<B")
+        if active not in (0, 1):
+            raise MemoryReadError("Invalid spell-result active flag")
+        if not active:
+            return ResultMenu(False)
+        raw = self._read(self.addresses["SPELL_RESULT_MENU"] + 0xB40, 0x260)
+        selection = struct.unpack_from("<i", raw, 4)[0]
+        phase = struct.unpack_from("<i", raw, 0x254)[0]
+        outcome = raw[0x258]
+        if phase not in range(6) or outcome not in (0, 1) or (phase == 1 and selection not in range(3)):
+            raise MemoryReadError("Invalid spell-result menu fields")
+        return ResultMenu(True, selection, phase, outcome)
 
     def _enemies(self):
         # Reference EnemyManager: an inline pool, not a pointer chain.

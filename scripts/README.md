@@ -18,15 +18,26 @@ lines on stdout; instructions and errors go to stderr.
 partial summary when an episode check fails. Existing files are never overwritten.
 If the requested path exists, a suffix such as `-001` or `-002` is added. The
 actual log path is printed to stderr before connecting to the game.
+
+`python -m scripts.probe_menu capture --label success_default --output runs/menu.jsonl`
+waits five seconds, then takes 20 labeled raw captures over about one second.
+No input is sent. Labels also include success_retry, death_default, timeout_default,
+and combat. See the root README for the screen/selection checklist.
+`python -m scripts.probe_menu compare LEFT RIGHT` prints stable-byte candidates
+from two labels of the same build. Raw hex stays in files, not the console.
+Baseline captures now include `result_candidates` and print the last sample's
+unverified active/selection/phase/outcome flag. Other builds may lack candidates.
 Read-only samples now include `enemy_count`, `enemies_sampled`, `enemies`, and
 `sample_seconds`. Each enemy has slot, x/y, signed hp, is_boss, collidable, visible,
 and raw flags1/2/3. Live episode info includes the same enemy records. The reader
 does not estimate damage or identify successful spells from these fields.
 Summaries distinguish `death_or_retry_episodes` and `unresolved_episodes`.
-`success_rate` remains null; closed episodes are not assumed to be wins.
+`successful_episodes` and `classified_failure_episodes` count recognized results.
+`success_rate` is null unless every closed episode has a recognized result.
 `diagnostics.py` implements JSONL recording and the reusable multi-episode check.
 
-The command stops on faults, unsupported reset states, or a non-death ending.
+The command stops on faults or unresolved endings. Recognized success and failure
+menus can both be retried with `--spell-retry` on the baseline build.
 It is an integration check, not a training or evaluation benchmark.
 
 `--policy random|stay|reactive|reactive_attack` selects a baseline. `--capacity` sets the padded

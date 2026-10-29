@@ -86,8 +86,8 @@ resetting an ongoing task is not implemented.
   are reported through `radius_fallback_count` / `radius_fallback_slots`.
   This estimate may differ from the actual hitbox; inspect frequent fallbacks
   before trusting collision-sensitive training or evaluation.
-- Start and successful completion still require manual task selection. Automatic
-  retries cover failed spell practice only, under the menu assumption above.
+- Initial task selection remains manual. The validated baseline build now
+  supports recognized success/failure retries with `--spell-retry`.
 - External sampling cannot freeze the engine or guarantee exact action repeats.
   `delta_frames` measures elapsed logic frames, including input/acquisition delay.
 - Observations are padded bullet and enemy arrays, not images. Lasers and enemy
@@ -138,8 +138,8 @@ frames (7.745 seconds) as if both were measured combat survival.
 
 Summaries report `death_or_retry_episodes` instead of the ambiguous legacy
 `failed_episodes`. `unresolved_episodes` includes quiet stops, external time
-limits, and scene exits. `success_rate` is null until reliable result detection
-exists. `completed_episodes` counts closed environment episodes, not game wins.
+limits, and scene exits. `success_rate` is reported only when every closed episode
+has a recognized result-menu outcome. Closed episodes are not automatically wins.
 Historical JSONL files keep their original fields and are not rewritten.
 
 For a bounded manual check, add `--quiet-limit 180`. After bullets have first
@@ -209,7 +209,115 @@ distance; `info.dropped_enemies` reports omitted slots. The actor never receives
 raw HP. The observation layout has changed: state-v1 traces/models are not
 directly compatible. Random, stay, and reactive ignore the added enemy input.
 
-For the next live check, observe whether the player follows boss horizontal
-movement and whether HP decreases in logged enemy records. Quiet result screens
-still require manual review and manual spell selection before a new run. A
-successful attack or disappearing boss does not create an automatic win label.
+Live check: `runs/reactive-attack.jsonl` completed 551 transitions (1102 logic
+frames) with no errors, radius fallbacks, or dropped bullets. Sampled boss HP fell
+from 900 to 1, then its slot disappeared. The user confirmed attack alignment,
+evasion, and an explicit successful spell screen. This is one manually confirmed
+clear, not an estimated success rate. The automatic result remains unresolved.
+
+The user observed this success-menu order, initially highlighting the first item:
+
+1. Return to spell card selection
+2. Save replay
+3. Retry
+
+Success retry therefore needs two Down taps followed by confirmation from that
+known initial selection. It must not reuse the failure-menu confirm-only route.
+This navigation is now enabled on the validated baseline profile: it reads the
+current selection and only confirms Retry in phase 1. Quiet stops still require
+manual review. Boss disappearance alone does not create a win label.
+
+## Result-menu discovery
+
+Reference material does not yet identify a verified spell-success flag or menu
+cursor field. `scripts.probe_menu` captures small, known memory neighborhoods
+without sending input. Labels describe the screen observed by the operator;
+they do not make the captured data an automatic classifier.
+
+For each command below, switch back to the specified screen within five seconds,
+then leave its selection unchanged for about one second. The command prints the
+actual log path; existing paths receive numbered suffixes. Capture only menus,
+not an actively running policy. Keep other input tools stopped.
+
+```powershell
+# Successful result, default Return to spell card selection highlighted.
+python -m scripts.probe_menu capture --label success_default --output runs/menu-success-default.jsonl
+
+# Same success screen, manually press Down twice to highlight Retry, without confirming.
+python -m scripts.probe_menu capture --label success_retry --output runs/menu-success-retry.jsonl
+
+# Failure after taking a hit, leave its default selection unchanged.
+python -m scripts.probe_menu capture --label death_default --output runs/menu-death-default.jsonl
+
+# Failure after surviving until the spell timer expires, leave its default unchanged.
+python -m scripts.probe_menu capture --label timeout_default --output runs/menu-timeout-default.jsonl
+```
+
+The first two captures can come from the same successful result. Other captures
+can be collected when those outcomes next occur; no need to repeat every case at
+once. A `combat` label is available for a later control capture.
+
+Compare captures using their actual paths:
+
+```powershell
+python -m scripts.probe_menu compare runs/menu-success-default.jsonl runs/menu-success-retry.jsonl
+python -m scripts.probe_menu compare runs/menu-success-default.jsonl runs/menu-timeout-default.jsonl
+```
+
+The comparison excludes bytes changing within either capture and reports up to
+64 stable differences per region. These are candidates only: unrelated game
+state can also differ, and candidates must reproduce in independent trials.
+The probe tool never sends input. Runtime result navigation is separately enabled
+only by the validated baseline profile.
+
+Probe evidence: `menu-success-default-001.jsonl` and `menu-success-retry.jsonl`
+each contain 20 samples from the baseline build, with no region read errors.
+There were zero stable differences in status, player_state, and gui_pointee.
+The first captured bytes also matched exactly in all regions. The sampled
+neighborhoods do not currently expose a cursor candidate; no menu offset should
+be inferred from these captures. Locate the NC-specific menu code in the exact
+executable before asking for broader memory snapshots. The TH06 reconstruction's
+Gui/GuiImpl definitions are leads only, not verified NC result-menu layouts.
+
+Subsequent static analysis located a different owner: the AsciiManager spell
+result menu. Baseline-only candidate addresses are now included in probe captures.
+See `configs/MENU_RESULT_EVIDENCE.md`. Repeat the two success captures with this
+version; the command also prints unverified active/selection/phase/outcome values.
+Expected selection 0 -> 2 is a hypothesis to test, not an enabled input rule.
+
+Success captures `menu-success-default-002.jsonl` and
+`menu-success-retry-001.jsonl` now confirm selection 0 -> 2, with active=1,
+phase=1, and outcome_flag=1 in all 20 samples each. No read errors occurred.
+Death and timeout captures have since completed the cross-check below.
+
+## Recognized result retry
+
+Baseline build `b0cc28ec904e9efce2439ad857c938b5` now supports recognized results.
+Both failure captures contain 20 samples of active=1, selection=2, phase=1,
+outcome_flag=0. Success captures have outcome_flag=1. See the evidence document.
+
+```powershell
+python -m scripts.sample_game --run --spell-retry --episodes 3 --capacity 128 --policy reactive_attack --output runs/result-retry.jsonl
+```
+
+Omit `--quiet-limit` for this check. Episode reasons are `spell_success` and
+`spell_failure`; the result flag alone does not distinguish death from timer
+expiry. Result activation releases combat keys. Transient result phases have up
+to three seconds to settle. Reset reads selection before each bounded Down tap,
+confirms only Retry (index 2), and waits for a new playable scene. Keep game focus.
+
+Summaries add `successful_episodes` and `classified_failure_episodes`. Success
+rate remains null if any ending is unresolved or classified only by legacy death
+detection. No success reward bonus was added. Initial result screens can be
+retried, but their outcomes are not counted as episodes. The newer build retains
+legacy behavior.
+
+Live acceptance passed in `runs/result-retry.jsonl`: three complete episodes,
+one failure followed by two successes, with two inter-episode retries and no
+errors or unresolved outcomes. All resets returned to playable state. The
+observed 2/3 success rate is a three-trial smoke test, not a performance estimate.
+
+The next training stage should collect complete episodes and update the policy
+while the verified result menu remains active. Resume with reset only after the
+update finishes. This avoids leaving movement held in a running battle during
+optimization; engine pause/resume and fixed-step control remain unimplemented.

@@ -27,3 +27,12 @@ slot 0 moved (x 192.0-279.12, y 51.94-144.0); HP fell from 747 to 1. Collision
 disabled at HP 1 before the slot disappeared. The user observed the defeat.
 This supports position/HP decoding on that build, not an automatic clear rule.
 The newer build and general slot-reuse/phase semantics still need validation.
+
+Optional `GUI` anchors are included for menu probes: baseline `0xA6EC08`, newer
+build `0xABAE28`, from reference offsets/cache. The pointee layout and its relation
+to spell result menus are unverified. Probes record unreadable pointers/regions
+as errors and do not fall back to guessed locations.
+
+Baseline-only `SPELL_RESULT_*_CANDIDATE` addresses come from static analysis of
+the exact executable. See `MENU_RESULT_EVIDENCE.md` for code references and the
+required live checks. They are optional probe inputs, not runtime menu rules.

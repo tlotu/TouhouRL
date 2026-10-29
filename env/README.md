@@ -24,6 +24,10 @@
   frame limits, fault handling, and cleanup. Usable without Gymnasium.
 - `touhou_env.py`: Gymnasium adapter with `Discrete(9)` actions and float32
   dictionary observations. `seed` does not seed the native game.
+- `menu_probe.py`: Bounded raw-state captures and stable-byte comparisons for
+  manually labeled result menus. It neither classifies outcomes nor sends keys.
+  The baseline profile also exposes statically derived result-menu candidates.
+  Decoded candidate fields remain explicitly unverified and probe-only.
 
 Reader, keyboard, clock, and sleep dependencies are replaceable for offline tests.
 Enemy telemetry is in `Snapshot.enemies` and `info.enemies`. State-v2 also adds a
@@ -34,3 +38,10 @@ HP is not a normalized health bar; increases, nonpositive values, or reused slot
 IDs must not be interpreted as damage, death, or spell results without validation.
 Live construction is explicit through `windows.connect()`; imports never attach
 to a process or send input.
+
+Result-menu evidence: the user-confirmed success screen defaults to Return to
+spell card selection, followed by Save replay and Retry. The failure-menu route
+is not valid for this screen. The baseline profile now provides
+`Snapshot.result_menu`, settled outcome classification, and selection-aware retry.
+Quiet-combat heuristics never authorize menu input. Other profiles retain legacy
+detection. Unexpected phases, invalid reads, and focus loss stop input.

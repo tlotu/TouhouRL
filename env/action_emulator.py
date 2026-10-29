@@ -72,11 +72,16 @@ class ActionEmulator:
             raise InputError("Could not release all owned keys") from errors[0]
 
     def tap_confirm(self, sleep, duration=0.06):
+        self.tap_key("z", sleep, duration)
+
+    def tap_key(self, key, sleep, duration=0.06):
+        if key not in ("z", "down", "up"):
+            raise ValueError("Unsupported menu key")
         self.release_all()
         self.check_focus()
-        self.held.add("z")
+        self.held.add(key)
         try:
-            self.keyboard.key_down("z")
+            self.keyboard.key_down(key)
             sleep(duration)
         finally:
             self.release_all()
