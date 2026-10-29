@@ -1,0 +1,36 @@
+{
+  "source": "Reference/th06nc-autododge-main/tools/addr_cache.json and offsets.py",
+  "verification": "Reference data only; not verified on this machine. Fixed structure offsets require validation.",
+  "builds": {
+    "fe47d9c26828e4671a2d2e4bf00af5a4": {
+      "rvas": {
+        "CALC_COUNT": "0x00C6DE20",
+        "CUR_STATE": "0x00C6DFBC",
+        "WANT_STATE": "0x00C6DFB8",
+        "LIVES": "0x00549D40",
+        "BOMBS": "0x00549D41",
+        "DEATHS": "0x0053CAB0",
+        "DYING": "0x0053D401",
+        "RETRY": "0x00549D42",
+        "PLAYER_BASE": "0x00549FF0",
+        "PLAYER_X": "0x00551720",
+        "BM_RVA": "0x00436EF0"
+      }
+    },
+    "b0cc28ec904e9efce2439ad857c938b5": {
+      "rvas": {
+        "CALC_COUNT": "0xC21C00",
+        "CUR_STATE": "0xC21D9C",
+        "WANT_STATE": "0xC21D98",
+        "LIVES": "0x4FF0F0",
+        "BOMBS": "0x4FF0F1",
+        "DEATHS": "0x4F1E60",
+        "DYING": "0x4F27B1",
+        "RETRY": "0x4FF0F2",
+        "PLAYER_BASE": "0x4FF3A0",
+        "PLAYER_X": "0x506AD0",
+        "BM_RVA": "0x3EC2A0"
+      }
+    }
+  }
+}
