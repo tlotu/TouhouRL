@@ -14,6 +14,8 @@ python -m unittest discover -s tests -v
 - `test_touhou_env.py`: Episode termination/truncation, retry cycles, fault
   cleanup, observation encoding, and the optional Gymnasium adapter.
 - `test_windows.py`: Windows x64 structure sizes without live process/input calls.
+- `test_diagnostics.py`: Ten consecutive fake episodes, partial summaries,
+  initial focus waiting, and error logging.
 
 Tests do not start the game, send real keys, or require a GPU. Passing these tests
 does not validate live addresses or the spell failure-menu default selection.

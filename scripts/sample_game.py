@@ -2,13 +2,13 @@
 import argparse
 from dataclasses import asdict
 import json
-import random
 import sys
 import time
 
 from env.action_emulator import ActionEmulator
 from env.session import GameSession
 from env.windows import WindowsKeyboard, connect
+from scripts.diagnostics import DiagnosticLog, run_episodes
 
 
 def main():
@@ -22,6 +22,9 @@ def main():
     parser.add_argument("--episodes", type=int, default=3)
     parser.add_argument("--max-frames", type=int, default=3600)
     parser.add_argument("--repeat", type=int, default=2)
+    parser.add_argument("--focus-timeout", type=float, default=30.0)
+    parser.add_argument("--seed", type=int, default=0, help="Random action seed; does not seed the game")
+    parser.add_argument("--output", help="New JSONL log path; existing files are never overwritten")
     args = parser.parse_args()
     if min(args.samples, args.episodes, args.max_frames) <= 0:
         parser.error("samples, episodes, and max-frames must be positive")
@@ -29,8 +32,17 @@ def main():
         parser.error("repeat must be from 1 to 16")
     if args.spell_retry and not args.run:
         parser.error("--spell-retry requires --run")
+    if not 0 < args.focus_timeout <= 60:
+        parser.error("focus-timeout must be in (0, 60]")
+    with DiagnosticLog(args.output) as log:
+        run(args, log.emit)
+
+
+def run(args, emit):
     reader, pid, digest = connect(args.pid, args.profiles)
-    print(json.dumps({"pid": pid, "build_md5": digest}), flush=True)
+    emit({"event": "connected", "pid": pid, "build_md5": digest,
+          "run": args.run, "spell_retry": args.spell_retry, "repeat": args.repeat,
+          "seed": args.seed, "max_frames": args.max_frames})
     if not args.run:
         try:
             for _ in range(args.samples):
@@ -38,7 +50,7 @@ def main():
                 data = asdict(sample)
                 data.pop("bullets")
                 data["bullet_count"] = len(sample.bullets)
-                print(json.dumps(data), flush=True)
+                emit({"event": "sample", **data})
                 time.sleep(0.1)
         finally:
             reader.close()
@@ -50,26 +62,11 @@ def main():
     except BaseException:
         reader.close()
         raise
-    print("Switch to the running spell-practice window within 5 seconds.", file=sys.stderr)
+    print(f"Focus the running spell-practice window within {args.focus_timeout:g} seconds. "
+          "Do not switch windows during the test.", file=sys.stderr)
     with session:
-        time.sleep(5)
-        rng = random.Random(0)
-        for episode in range(args.episodes):
-            _, info = session.reset()
-            print(json.dumps({"episode": episode, "event": "reset", **info}), flush=True)
-            steps = 0
-            while True:
-                action = rng.randrange(9)
-                _, reward, terminated, truncated, info = session.step(action)
-                steps += 1
-                if steps % 30 == 0 or terminated or truncated:
-                    print(json.dumps({"episode": episode, "action": action, "reward": reward,
-                                      "terminated": terminated, "truncated": truncated, **info}), flush=True)
-                if terminated or truncated:
-                    break
-            if info["reason"] != "death":
-                print("Task ended without a failure-menu retry; manual selection is required.", file=sys.stderr)
-                break
+        controls.wait_for_focus(args.focus_timeout)
+        run_episodes(session, args.episodes, emit, args.seed)
 
 
 if __name__ == "__main__":

@@ -33,15 +33,20 @@ Profiles are reference data, not proof that this machine has been validated.
 
 First verify the read-only values. Select one spell manually and confirm that
 its failure menu defaults to **Retry**. Start the command, then focus the game
-within five seconds:
+within 30 seconds and keep it focused:
 
 ```powershell
-python -m scripts.sample_game --run --spell-retry --episodes 3
+python -m scripts.sample_game --run --spell-retry --episodes 10 --output runs/retry-check.jsonl
 ```
 
 The diagnostic sends random nine-direction movement with Z and Shift held.
 It can lose the challenge. It releases owned keys on termination, errors,
 focus loss, and Ctrl+C. It never selects difficulty, character, or spells.
+`Game window lost focus` deliberately aborts the check. Initial focus is awaited;
+mid-task focus loss never silently resumes the same episode. Use a new log path
+for each run. The JSONL log records resets, episode endings, summaries, and errors.
+Ten completed failure episodes with nine observed retries validate repeated
+failure handling, not successful spell completion.
 `--spell-retry` is an explicit task-context assertion: the available memory
 flag cannot distinguish a normal Continue menu from a spell failure menu.
 Do not use that option in a normal run or after moving the failure-menu cursor.
@@ -69,7 +74,8 @@ resetting an ongoing task is not implemented.
 
 ## Current limits
 
-- No live game validation has been completed for this implementation.
+- The user reported one successful failure-menu retry followed by firing and
+  random movement. Continuous live retries remain unverified.
 - Start and successful completion still require manual task selection. Automatic
   retries cover failed spell practice only, under the menu assumption above.
 - External sampling cannot freeze the engine or guarantee exact action repeats.
