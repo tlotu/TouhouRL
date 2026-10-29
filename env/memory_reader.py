@@ -28,6 +28,24 @@ class Bullet:
 
 
 @dataclass(frozen=True)
+class Enemy:
+    slot: int
+    x: float
+    y: float
+    hp: int
+    flags1: int
+    flags2: int
+    flags3: int
+
+    def record(self):
+        return {"slot": self.slot, "x": self.x, "y": self.y, "hp": self.hp,
+                "is_boss": bool(self.flags2 & 0x08),
+                "collidable": bool(self.flags2 & 0x02),
+                "visible": not bool(self.flags3 & 0x08),
+                "flags1": self.flags1, "flags2": self.flags2, "flags3": self.flags3}
+
+
+@dataclass(frozen=True)
 class Snapshot:
     frame: int
     scene: int
@@ -41,6 +59,7 @@ class Snapshot:
     x: float
     y: float
     bullets: tuple = ()
+    enemies: tuple = ()
 
     @property
     def running(self):
@@ -53,7 +72,7 @@ class Snapshot:
 
 
 REQUIRED = ("CALC_COUNT", "CUR_STATE", "WANT_STATE", "LIVES", "BOMBS",
-            "DEATHS", "DYING", "RETRY", "PLAYER_BASE", "PLAYER_X", "BM_RVA")
+            "DEATHS", "DYING", "RETRY", "PLAYER_BASE", "PLAYER_X", "BM_RVA", "EM_RVA")
 DEFAULT_PROFILES = Path(__file__).resolve().parents[1] / "configs" / "memory_profiles.json"
 
 
@@ -106,9 +125,11 @@ class MemoryReader:
                 state = self._read(self.addresses["PLAYER_BASE"] + 0x7898, 1)[0]
                 x, y = struct.unpack("<ff", self._read(self.addresses["PLAYER_X"], 8))
                 bullets = self._bullets()
+                enemies = self._enemies()
             else:
                 # Player/pool storage may be stale while a scene is being loaded.
                 state, x, y, bullets = 0, 0.0, 0.0, ()
+                enemies = ()
             end = self.frame()
             if start != end:
                 continue
@@ -119,7 +140,7 @@ class MemoryReader:
             if deaths < 0 or state > 3:
                 raise MemoryReadError("Invalid player state or death count")
             return Snapshot(end, scene, wanted, lives, bombs, deaths, dying,
-                            retry, state, x, y, bullets)
+                            retry, state, x, y, bullets, enemies)
         raise MemoryReadError("Game advanced during every sample; retry acquisition")
 
     def _bullets(self):
@@ -144,6 +165,25 @@ class MemoryReader:
                 # This is an estimate, not a guarantee of collision geometry.
                 radius = 3.0
             result.append(Bullet(slot, x, y, vx, vy, radius, state, estimated))
+        return tuple(result)
+
+    def _enemies(self):
+        # Reference EnemyManager: an inline pool, not a pointer chain.
+        stride = 0x10B0
+        raw = self._read(self.addresses["EM_RVA"] + 8, 256 * stride)
+        result = []
+        for slot in range(256):
+            offset = slot * stride
+            flags1, flags2, flags3 = struct.unpack_from("<BBB", raw, offset + 0xBC)
+            if not flags1 & 0x80:
+                continue
+            x, y = struct.unpack_from("<ff", raw, offset + 0xB0)
+            hp = struct.unpack_from("<i", raw, offset + 0x234)[0]
+            if not math.isfinite(x) or not math.isfinite(y):
+                raise MemoryReadError(f"Non-finite enemy position in slot {slot}")
+            # Keep offscreen, invisible, non-collidable, and nonpositive-HP
+            # occupied slots for diagnosis. None alone proves a spell clear.
+            result.append(Enemy(slot, x, y, hp, flags1, flags2, flags3))
         return tuple(result)
 
     def close(self):

@@ -14,7 +14,8 @@
         "RETRY": "0x00549D42",
         "PLAYER_BASE": "0x00549FF0",
         "PLAYER_X": "0x00551720",
-        "BM_RVA": "0x00436EF0"
+        "BM_RVA": "0x00436EF0",
+        "EM_RVA": "0x00AEE0B0"
       }
     },
     "b0cc28ec904e9efce2439ad857c938b5": {
@@ -29,7 +30,8 @@
         "RETRY": "0x4FF0F2",
         "PLAYER_BASE": "0x4FF3A0",
         "PLAYER_X": "0x506AD0",
-        "BM_RVA": "0x3EC2A0"
+        "BM_RVA": "0x3EC2A0",
+        "EM_RVA": "0xAA1E90"
       }
     }
   }

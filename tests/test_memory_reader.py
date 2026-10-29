@@ -11,7 +11,7 @@ from env.memory_reader import (MemoryReader, MemoryReadError, REQUIRED,
 
 class ByteProcess:
     def __init__(self):
-        self.data = bytearray(0x120000)
+        self.data = bytearray(0x250000)
         self.short = False
         self.closed = False
 
@@ -26,7 +26,8 @@ class MemoryTests(unittest.TestCase):
     def setUp(self):
         self.process = ByteProcess()
         self.addresses = {name: 0x100 + i * 16 for i, name in enumerate(REQUIRED)}
-        self.addresses.update(PLAYER_BASE=0x1000, PLAYER_X=0x200, BM_RVA=0x20000)
+        self.addresses.update(PLAYER_BASE=0x1000, PLAYER_X=0x200,
+                              BM_RVA=0x20000, EM_RVA=0x130000)
         self.reader = MemoryReader(self.process, 0, self.addresses)
         for name, value, fmt in (("CALC_COUNT", 10, "<B"), ("CUR_STATE", 2, "<i"),
                                   ("WANT_STATE", 2, "<i"), ("LIVES", 0, "<B"),

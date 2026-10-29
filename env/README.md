@@ -6,6 +6,9 @@
   Estimated bullets remain in observations and are marked in diagnostic info
   (`radius_fallback_count` and `radius_fallback_slots`). Invalid positions,
   velocities, and short reads still raise errors.
+  Also bulk-reads 256 enemy slots per playable sample and preserves their raw
+  signed HP, position, and flags. Occupancy uses flags1 bit7; invisibility and
+  collision flags are diagnostic attributes, not reasons to discard a slot.
 - `windows.py`: Lazy Win32 bindings for process discovery, read-only memory
   access, and foreground-only scan-code input. No game-file writes or injection.
 - `action_emulator.py`: Nine directions, optional fixed Z/Shift, and owned-key
@@ -23,5 +26,10 @@
   dictionary observations. `seed` does not seed the native game.
 
 Reader, keyboard, clock, and sleep dependencies are replaceable for offline tests.
+Enemy telemetry is in `Snapshot.enemies` and `info.enemies`; the actor observation
+schema and reward remain unchanged. Pools are skipped outside playable scenes.
+Check `enemies_sampled` before treating an empty list as a measured absence.
+HP is not a normalized health bar; increases, nonpositive values, or reused slot
+IDs must not be interpreted as damage, death, or spell results without validation.
 Live construction is explicit through `windows.connect()`; imports never attach
 to a process or send input.

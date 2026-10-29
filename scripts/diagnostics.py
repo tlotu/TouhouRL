@@ -1,8 +1,8 @@
 """Repeatable episode checks and append-free JSONL evidence."""
 import json
 from pathlib import Path
-import random
 import sys
+from agent.baselines import make_policy
 
 
 class DiagnosticLog:
@@ -44,22 +44,36 @@ class DiagnosticLog:
                 self.file.close()
 
 
-def run_episodes(session, episodes, emit, seed=0):
+def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False):
     """Report every reset and terminal event, including partially failed runs."""
-    rng = random.Random(seed)
+    choose = make_policy(policy, seed)
     resets = completed = failures = 0
     total_frames = 0
     reason = None
+    transitions = fallback_steps = 0
+    max_bullets = max_dropped = max_fallback = 0
     try:
         for episode in range(episodes):
-            _, info = session.reset()
+            obs, info = session.reset()
             resets += 1
             emit({"event": "reset", "episode": episode, **info})
             steps = 0
             episode_return = 0.0
             while True:
-                action = rng.randrange(9)
-                _, reward, terminated, truncated, info = session.step(action)
+                action = choose(obs)
+                next_obs, reward, terminated, truncated, info = session.step(action)
+                transitions += 1
+                max_bullets = max(max_bullets, info.get("bullet_count", 0))
+                max_dropped = max(max_dropped, info.get("dropped_bullets", 0))
+                fallback_count = info.get("radius_fallback_count", 0)
+                max_fallback = max(max_fallback, fallback_count)
+                fallback_steps += int(fallback_count > 0)
+                if trace:
+                    emit({"event": "transition", "episode": episode, "step": steps,
+                          "observation": obs, "action": action, "reward": reward,
+                          "next_observation": next_obs, "terminated": terminated,
+                          "truncated": truncated, "info": info})
+                obs = next_obs
                 steps += 1
                 episode_return += reward
                 if steps % 30 == 0 or terminated or truncated:
@@ -72,11 +86,19 @@ def run_episodes(session, episodes, emit, seed=0):
                     total_frames += info["elapsed_frames"]
                     emit({"event": "episode_end", "episode": episode, "steps": steps,
                           "return": episode_return, **info})
+                    if reason == "quiet_after_combat":
+                        emit({"event": "manual_review", "episode": episode,
+                              "message": "Combat became quiet. Check the result screen; success is not inferred. "
+                                         "Select the spell manually before starting a new run."})
                     break
             if reason != "death":
                 break
     finally:
         emit({"event": "summary", "requested_episodes": episodes, "resets": resets,
-              "completed_episodes": completed, "failed_episodes": failures,
+              "policy": policy, "transitions": transitions,
+              "max_bullet_count": max_bullets, "max_dropped_bullets": max_dropped,
+              "radius_fallback_steps": fallback_steps, "max_radius_fallback_count": max_fallback,
+              "completed_episodes": completed, "death_or_retry_episodes": failures,
+              "unresolved_episodes": completed - failures, "success_rate": None,
               "observed_retries": max(0, resets - 1), "completed_frames": total_frames,
               "all_requested_completed": completed == episodes, "last_reason": reason})

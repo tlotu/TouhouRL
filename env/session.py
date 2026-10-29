@@ -23,12 +23,17 @@ class GameSession:
     """Real-time diagnostic environment; network-update pausing is not implemented."""
 
     def __init__(self, reader, controls, repeat=2, capacity=64, max_frames=3600,
-                 spell_retry=False, clock=time.monotonic, sleep=time.sleep):
+                 spell_retry=False, clock=time.monotonic, sleep=time.sleep, quiet_limit=0):
         if not isinstance(capacity, int) or capacity <= 0:
             raise ValueError("capacity must be a positive integer")
         if not isinstance(max_frames, int) or max_frames <= 0:
             raise ValueError("max_frames must be a positive integer")
         self.reader, self.controls = reader, controls
+        if not isinstance(quiet_limit, int) or quiet_limit < 0:
+            raise ValueError("quiet_limit must be a nonnegative integer")
+        self.quiet_limit = quiet_limit
+        self.quiet_frames = 0
+        self.saw_bullets = False
         self.capacity, self.max_frames = capacity, max_frames
         self.clock = clock
         self.stepper = FrameStepper(reader, controls, repeat, clock=clock, sleep=sleep)
@@ -45,9 +50,13 @@ class GameSession:
                 "lives": s.lives, "bombs": s.bombs, "deaths": s.deaths,
                 "dying": s.dying, "retry": s.retry,
                 "bullet_count": len(s.bullets),
+                "enemy_count": len(s.enemies),
+                "enemies_sampled": s.running,
+                "enemies": [enemy.record() for enemy in s.enemies],
                 "radius_fallback_count": sum(b.radius_estimated for b in s.bullets),
                 "radius_fallback_slots": [b.slot for b in s.bullets if b.radius_estimated],
                 "dropped_bullets": max(0, len(s.bullets) - self.capacity),
+                "quiet_frames": self.quiet_frames,
                 "delta_frames": frames, "elapsed_frames": self.elapsed_frames,
                 "step_seconds": seconds}
 
@@ -62,6 +71,8 @@ class GameSession:
             self.sample = self.resetter.reset(first=not self.started)
             self.started = self.active = True
             self.elapsed_frames = 0
+            self.quiet_frames = 0
+            self.saw_bullets = bool(self.sample.bullets)
             self.last_observation_time = self.clock()
             return observation(self.sample, self.capacity), self._info()
         except BaseException:
@@ -79,10 +90,17 @@ class GameSession:
             previous = self.sample
             self.sample, frames, seconds = self.stepper.advance(previous)
             self.elapsed_frames += frames
+            if self.sample.bullets:
+                self.saw_bullets = True
+                self.quiet_frames = 0
+            elif self.saw_bullets:
+                self.quiet_frames += frames
             died = self.sample.deaths > previous.deaths or self.sample.retry
             terminated = died or not self.sample.running
-            truncated = not terminated and self.elapsed_frames >= self.max_frames
-            reason = "death" if died else "scene_exit" if terminated else "time_limit" if truncated else None
+            quiet_stop = bool(self.quiet_limit and self.quiet_frames >= self.quiet_limit)
+            truncated = not terminated and (quiet_stop or self.elapsed_frames >= self.max_frames)
+            reason = ("death" if died else "scene_exit" if terminated else
+                      "quiet_after_combat" if quiet_stop else "time_limit" if truncated else None)
             # Terminal frames do not earn survival credit.
             reward = (-1.0 if died else 0.0) if terminated else frames / 60.0
             if terminated or truncated:
