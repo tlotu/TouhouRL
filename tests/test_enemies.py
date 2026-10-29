@@ -10,6 +10,25 @@ from tests.test_memory_reader import ByteProcess
 
 
 class EnemyReadTests(unittest.TestCase):
+    def test_observed_defeat_tail_does_not_fabricate_a_spell_result(self):
+        # enemy-check-001: HP remains 1, collision turns off, then slot disappears.
+        self.enemy(hp=1, flags1=134, flags2=13, flags3=1)
+        enemies = self.reader.snapshot().enemies
+        self.assertEqual(enemies[0].hp, 1)
+        self.assertFalse(enemies[0].record()["collidable"])
+        self.assertTrue(enemies[0].record()["is_boss"])
+        clock = FakeClock()
+        reader = FakeReader(sample(), sample(frame=11, enemies=enemies),
+                            sample(frame=13, enemies=enemies), sample(frame=15))
+        with GameSession(reader, ActionEmulator(FakeKeyboard()),
+                         clock=clock, sleep=clock.sleep) as session:
+            session.reset()
+            self.assertFalse(session.step(0)[2])
+            _, _, terminated, truncated, info = session.step(0)
+            self.assertFalse(terminated or truncated)
+            self.assertEqual(info["enemy_count"], 0)
+            self.assertIsNone(info["reason"])
+
     def setUp(self):
         self.process = ByteProcess()
         addresses = {name: 0x100 + i * 16 for i, name in enumerate(REQUIRED)}

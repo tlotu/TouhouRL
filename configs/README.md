@@ -21,3 +21,9 @@ Slot fields: x/y float32 at `0xB0/0xB4`, signed HP int32 at `0x234`, flags bytes
 at `0xBC/0xBD/0xBE`. Sources: reference `tools/read_enemies.py`, `tools/offsets.py`,
 `tools/addr_cache.json`, and MEMMAP section 6. These remain unverified locally.
 Custom profile files must now include `EM_RVA`; missing entries fail explicitly.
+
+Live evidence: `runs/enemy-check-001.jsonl`, baseline build, 153 samples. Boss
+slot 0 moved (x 192.0-279.12, y 51.94-144.0); HP fell from 747 to 1. Collision
+disabled at HP 1 before the slot disappeared. The user observed the defeat.
+This supports position/HP decoding on that build, not an automatic clear rule.
+The newer build and general slot-reuse/phase semantics still need validation.

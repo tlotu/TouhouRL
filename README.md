@@ -162,7 +162,17 @@ phase changes, invulnerability, and practice timeouts need separate handling.
 ## Enemy telemetry validation
 
 Enemy position/HP acquisition and offline tests are implemented. Both bundled
-build profiles include `EM_RVA`. Live values still need verification:
+build profiles include `EM_RVA`. The baseline build was checked against a manual
+run in `runs/enemy-check-001.jsonl`: 153 samples, 114 with Boss slot 0 occupied,
+HP 747 down to 1, movement in both axes, then 39 empty-pool samples. All samples
+remained in scene 2 without a retry flag or player death. Maximum recorded sample
+time was about 4.14 ms. The final KeyboardInterrupt was a manual stop, not a read
+failure. The newer build remains unverified.
+
+HP did not visibly reach zero: it stayed at 1 while collision disabled, before
+the slot disappeared. Do not implement `hp <= 0` as the sole completion rule.
+Neither disappearance nor that transition is yet proven unique to a spell clear.
+To collect more live evidence:
 
 ```powershell
 python -m scripts.sample_game --samples 300 --output runs/enemy-check.jsonl
