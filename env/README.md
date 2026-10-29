@@ -26,8 +26,9 @@
   dictionary observations. `seed` does not seed the native game.
 
 Reader, keyboard, clock, and sleep dependencies are replaceable for offline tests.
-Enemy telemetry is in `Snapshot.enemies` and `info.enemies`; the actor observation
-schema and reward remain unchanged. Pools are skipped outside playable scenes.
+Enemy telemetry is in `Snapshot.enemies` and `info.enemies`. State-v2 also adds a
+padded `(16, 6)` actor input: relative x/y, boss, collidable, visible, and presence.
+HP stays in diagnostic info; rewards are unchanged. Pools are skipped outside playable scenes.
 Check `enemies_sampled` before treating an empty list as a measured absence.
 HP is not a normalized health bar; increases, nonpositive values, or reused slot
 IDs must not be interpreted as damage, death, or spell results without validation.

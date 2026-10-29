@@ -114,7 +114,7 @@ class EnemyReadTests(unittest.TestCase):
         self.assertEqual(result.frame, 2)
         self.assertEqual(result.enemies[0].hp, 1000)
 
-    def test_enemies_reach_info_without_changing_policy_observation(self):
+    def test_enemies_reach_info_and_policy_without_changing_bullet_observation(self):
         self.enemy()
         enemies = self.reader.snapshot().enemies
         start = sample(frame=11, enemies=enemies)
@@ -126,5 +126,7 @@ class EnemyReadTests(unittest.TestCase):
             obs, _, terminated, _, info = session.step(0)
         self.assertEqual(info["enemy_count"], 1)
         self.assertEqual(info["enemies"][0]["hp"], 1000)
-        self.assertEqual(obs, observation(sample(frame=13)))
+        self.assertEqual(obs["bullets"], observation(sample(frame=13))["bullets"])
+        self.assertEqual(obs["enemies"][0][2:], [1.0, 1.0, 1.0, 1.0])
+        self.assertNotIn("hp", obs)
         self.assertFalse(terminated)

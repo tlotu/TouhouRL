@@ -71,7 +71,7 @@ resetting an ongoing task is not implemented.
 | `configs/` | Build-specific memory profiles and reference attribution |
 | `scripts/` | Read-only and random-action live diagnostics |
 | `tests/` | Offline unit tests with fake process, clock, and keyboard dependencies |
-| `agent/` | Random, stationary, and reactive comparison policies |
+| `agent/` | Random, stationary, reactive avoidance, and attack-alignment baselines |
 | `models/`, `utils/` | Reserved; no runtime implementation yet |
 
 ## Current limits
@@ -90,8 +90,8 @@ resetting an ongoing task is not implemented.
   retries cover failed spell practice only, under the menu assumption above.
 - External sampling cannot freeze the engine or guarantee exact action repeats.
   `delta_frames` measures elapsed logic frames, including input/acquisition delay.
-- Observations are padded nearest-bullet arrays, not images. Enemies and lasers
-  are not encoded. The nearest 64 bullets may omit important threats; inspect
+- Observations are padded bullet and enemy arrays, not images. Lasers and enemy
+  body hitboxes are not encoded. The nearest 64 bullets may omit important threats; inspect
   `dropped_bullets` before training on dense patterns.
 - Each bullet row is `[dx/384, dy/448, vx/16, vy/16, radius/32, state/4, present]`.
   Values are clipped to the declared bounds. States 1-4 include live and spawning
@@ -118,7 +118,7 @@ fallback steps. These metrics cover the complete run, unlike periodic step logs.
 Game RNG is not controlled, so these are repeated trials, not paired seed tests.
 
 Add `--trace` to save every `(observation, action, reward, next_observation,
-terminated, truncated, info)` transition. Traces use the declared state-v1 schema;
+terminated, truncated, info)` transition. New traces use the declared state-v2 schema;
 they are useful for inspection and future imitation datasets, not directly as
 on-policy PPO replay. JSONL traces can be large and add real-time I/O overhead.
 
@@ -186,5 +186,30 @@ mode does not require game focus; the game may pause when unfocused.
 
 `enemies_sampled=false` means the pool was intentionally skipped (such as in the
 retry menu), not that all enemies were killed. Slot reuse, HP resets, invisibility,
-and collision flags require interpretation. Enemy telemetry is diagnostic only;
-the baseline policies, rewards, and automatic result handling are unchanged.
+and collision flags require interpretation. Enemy HP remains diagnostic only.
+Enemy positions and flags are now available to policies in state-v2; rewards and
+automatic result handling are unchanged.
+
+## Attack-alignment baseline
+
+```powershell
+python -m scripts.sample_game --run --spell-retry --episodes 3 --capacity 128 --policy reactive_attack --quiet-limit 180 --output runs/reactive-attack.jsonl
+```
+
+The new baseline tries to align below a visible, collidable boss while preserving
+nearly optimal predicted bullet clearance. It follows a moving target but does
+not predict target velocity. If no boss qualifies, it can target regular enemies
+above the player. It does not chase invisible/non-collidable enemies or enemies
+below the player. Safety estimates still omit lasers and enemy-body collisions.
+
+State-v2 adds `enemies`, a `(16, 6)` padded array with rows
+`[dx/384, dy/448, is_boss, collidable, visible, present]`. Relative coordinates
+are clipped to [-1, 1]. Bosses sort first, then visible/collidable enemies and
+distance; `info.dropped_enemies` reports omitted slots. The actor never receives
+raw HP. The observation layout has changed: state-v1 traces/models are not
+directly compatible. Random, stay, and reactive ignore the added enemy input.
+
+For the next live check, observe whether the player follows boss horizontal
+movement and whether HP decreases in logged enemy records. Quiet result screens
+still require manual review and manual spell selection before a new run. A
+successful attack or disappearing boss does not create an automatic win label.

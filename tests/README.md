@@ -22,6 +22,8 @@ python -m unittest discover -s tests -v
   new-wave counter resets, and death priority.
 - `test_enemies.py`: Enemy-pool boundaries, flags, signed HP, fresh reads,
   non-finite coordinates, short/torn reads, menu skipping, and info isolation.
+- `test_attack_policy.py`: Attack direction, target filtering, boss priority,
+  clearance constraints, close targets, enemy padding, and policy registration.
 
 Tests do not start the game, send real keys, or require a GPU. Passing these tests
 does not validate live addresses or the spell failure-menu default selection.

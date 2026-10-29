@@ -6,7 +6,7 @@ import sys
 import time
 
 from env.action_emulator import ActionEmulator
-from env.session import GameSession
+from env.session import GameSession, OBSERVATION_SCHEMA
 from env.windows import WindowsKeyboard, connect
 from scripts.diagnostics import DiagnosticLog, run_episodes
 
@@ -25,7 +25,7 @@ def main():
     parser.add_argument("--focus-timeout", type=float, default=30.0)
     parser.add_argument("--seed", type=int, default=0, help="Random action seed; does not seed the game")
     parser.add_argument("--output", help="New JSONL log path; existing files are never overwritten")
-    parser.add_argument("--policy", choices=("random", "stay", "reactive"), default="random")
+    parser.add_argument("--policy", choices=("random", "stay", "reactive", "reactive_attack"), default="random")
     parser.add_argument("--capacity", type=int, default=64, help="Maximum observed bullets (1-640)")
     parser.add_argument("--trace", action="store_true", help="Record every observation/action transition")
     parser.add_argument("--quiet-limit", type=int, default=0,
@@ -55,7 +55,7 @@ def run(args, emit):
           "run": args.run, "spell_retry": args.spell_retry, "repeat": args.repeat,
           "seed": args.seed, "max_frames": args.max_frames, "policy": args.policy,
           "capacity": args.capacity, "trace": args.trace, "quiet_limit": args.quiet_limit,
-          "schema": "touhourl-state-v1"})
+          "schema": OBSERVATION_SCHEMA})
     if not args.run:
         try:
             for _ in range(args.samples):

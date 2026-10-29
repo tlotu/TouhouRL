@@ -4,6 +4,9 @@ import time
 from .frame_stepper import FrameStepper, FrameTimeout
 from .reset_controller import ResetController
 
+ENEMY_CAPACITY = 16
+OBSERVATION_SCHEMA = "touhourl-state-v2"
+
 
 def observation(sample, capacity=64):
     def clip(value):
@@ -14,9 +17,16 @@ def observation(sample, capacity=64):
              clip(b.vx / 16), clip(b.vy / 16), b.radius / 32,
              b.state / 4, 1.0] for b in nearest[:capacity]]
     rows.extend([[0.0] * 7 for _ in range(capacity - len(rows))])
+    enemies = sorted(sample.enemies, key=lambda e: (
+        not bool(e.flags2 & 8), bool(e.flags3 & 8), not bool(e.flags2 & 2),
+        (e.x - sample.x)**2 + (e.y - sample.y)**2))
+    targets = [[clip((e.x - sample.x) / 384), clip((e.y - sample.y) / 448),
+                float(bool(e.flags2 & 8)), float(bool(e.flags2 & 2)),
+                float(not bool(e.flags3 & 8)), 1.0] for e in enemies[:ENEMY_CAPACITY]]
+    targets.extend([[0.0] * 6 for _ in range(ENEMY_CAPACITY - len(targets))])
     return {"player": [clip(sample.x / 192 - 1), clip(sample.y / 224 - 1),
                        min(sample.lives / 8, 1), min(sample.bombs / 8, 1)],
-            "bullets": rows}
+            "bullets": rows, "enemies": targets}
 
 
 class GameSession:
@@ -51,6 +61,7 @@ class GameSession:
                 "dying": s.dying, "retry": s.retry,
                 "bullet_count": len(s.bullets),
                 "enemy_count": len(s.enemies),
+                "dropped_enemies": max(0, len(s.enemies) - ENEMY_CAPACITY),
                 "enemies_sampled": s.running,
                 "enemies": [enemy.record() for enemy in s.enemies],
                 "radius_fallback_count": sum(b.radius_estimated for b in s.bullets),

@@ -29,11 +29,13 @@ Summaries distinguish `death_or_retry_episodes` and `unresolved_episodes`.
 The command stops on faults, unsupported reset states, or a non-death ending.
 It is an integration check, not a training or evaluation benchmark.
 
-`--policy random|stay|reactive` selects a baseline. `--capacity` sets the padded
+`--policy random|stay|reactive|reactive_attack` selects a baseline. `--capacity` sets the padded
 bullet limit (default 64, maximum 640). `--trace` requires `--run --output` and
 records every transition, including terminal observations. Connected events
 record the policy, capacity, seed, and observation schema. Summary peak/count
 metrics cover every step, even when full tracing is disabled.
+New logs use `touhourl-state-v2`, adding padded enemy-position/flag observations.
+Old state-v1 traces do not have that input and must not be silently mixed with v2.
 
 `--quiet-limit 180` optionally stops after three seconds of bullet-free logic
 frames following observed combat. This is a manual-review truncation, not a

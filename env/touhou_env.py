@@ -2,6 +2,7 @@
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+from .session import ENEMY_CAPACITY
 
 
 class TouhouEnv(gym.Env):
@@ -14,6 +15,7 @@ class TouhouEnv(gym.Env):
         self.observation_space = spaces.Dict({
             "player": spaces.Box(-1, 1, (4,), dtype=np.float32),
             "bullets": spaces.Box(-1, 1, (session.capacity, 7), dtype=np.float32),
+            "enemies": spaces.Box(-1, 1, (ENEMY_CAPACITY, 6), dtype=np.float32),
         })
 
     @staticmethod
