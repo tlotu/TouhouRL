@@ -66,9 +66,20 @@ class MemoryTests(unittest.TestCase):
         with self.assertRaises(MemoryReadError):
             self.reader.snapshot()
 
-    def test_invalid_bullet_geometry_is_rejected(self):
-        offset = self.bullet(0, 1)
-        struct.pack_into("<f", self.process.data, offset + 0x5F4, 0)
+    def test_missing_hitbox_dimensions_use_marked_reference_fallback(self):
+        offset = self.bullet(115, 1)
+        for width, height in ((0, 4), (-1, 4), (100, 100),
+                              (float("nan"), 4), (4, float("nan")),
+                              (float("inf"), 4)):
+            with self.subTest(width=width, height=height):
+                struct.pack_into("<ff", self.process.data, offset + 0x5F4, width, height)
+                bullet = self.reader.snapshot().bullets[0]
+                self.assertEqual((bullet.slot, bullet.radius), (115, 3.0))
+                self.assertTrue(bullet.radius_estimated)
+
+    def test_invalid_bullet_position_still_fails(self):
+        offset = self.bullet(115, 1)
+        struct.pack_into("<f", self.process.data, offset + 0x30, float("nan"))
         with self.assertRaises(MemoryReadError):
             self.reader.snapshot()
 

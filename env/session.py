@@ -45,6 +45,8 @@ class GameSession:
                 "lives": s.lives, "bombs": s.bombs, "deaths": s.deaths,
                 "dying": s.dying, "retry": s.retry,
                 "bullet_count": len(s.bullets),
+                "radius_fallback_count": sum(b.radius_estimated for b in s.bullets),
+                "radius_fallback_slots": [b.slot for b in s.bullets if b.radius_estimated],
                 "dropped_bullets": max(0, len(s.bullets) - self.capacity),
                 "delta_frames": frames, "elapsed_frames": self.elapsed_frames,
                 "step_seconds": seconds}

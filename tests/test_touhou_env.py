@@ -10,6 +10,18 @@ from tests.fakes import FakeClock, FakeKeyboard, FakeReader, sample
 
 
 class SessionTests(unittest.TestCase):
+    def test_estimated_radius_is_reported_and_bullet_is_retained(self):
+        bullet = Bullet(115, 193, 400, 0, 1, 3, 1, radius_estimated=True)
+        session = self.make_session(sample(frame=13, bullets=(bullet,)))
+        session.reset()
+        obs, _, terminated, _, info = session.step(0)
+        self.assertFalse(terminated)
+        self.assertEqual(info["radius_fallback_count"], 1)
+        self.assertEqual(info["radius_fallback_slots"], [115])
+        self.assertEqual(obs["bullets"][0][4], 3 / 32)
+        self.assertEqual(obs["bullets"][0][6], 1)
+        session.close()
+
     def make_session(self, *following, **kwargs):
         self.clock = FakeClock()
         self.keyboard = FakeKeyboard()

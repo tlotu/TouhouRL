@@ -76,7 +76,12 @@ resetting an ongoing task is not implemented.
 ## Current limits
 
 - The user reported one successful failure-menu retry followed by firing and
-  random movement. Continuous live retries remain unverified.
+  random movement. A later live log completed eight episodes and eight retries
+  before a missing bullet-radius error. A full ten-episode check is still pending.
+- Missing bullet dimensions now use the reference reader's 3 px estimate and
+  are reported through `radius_fallback_count` / `radius_fallback_slots`.
+  This estimate may differ from the actual hitbox; inspect frequent fallbacks
+  before trusting collision-sensitive training or evaluation.
 - Start and successful completion still require manual task selection. Automatic
   retries cover failed spell practice only, under the menu assumption above.
 - External sampling cannot freeze the engine or guarantee exact action repeats.

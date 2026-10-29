@@ -24,6 +24,7 @@ class Bullet:
     vy: float
     radius: float
     state: int
+    radius_estimated: bool = False
 
 
 @dataclass(frozen=True)
@@ -134,12 +135,15 @@ class MemoryReader:
             x, y = struct.unpack_from("<ff", raw, offset + 0x30)
             vx, vy = struct.unpack_from("<ff", raw, offset + 8)
             w, h = struct.unpack_from("<ff", raw, offset + 0x5F4)
-            if not all(math.isfinite(v) for v in (x, y, vx, vy, w, h)):
+            if not all(math.isfinite(v) for v in (x, y, vx, vy)):
                 raise MemoryReadError(f"Non-finite bullet data in slot {slot}")
-            radius = min(w, h) / 2
-            if not 0 < radius <= 32:
-                raise MemoryReadError(f"Invalid bullet radius in slot {slot}")
-            result.append(Bullet(slot, x, y, vx, vy, radius, state))
+            radius = min(w, h) / 2 if math.isfinite(w) and math.isfinite(h) else 0
+            estimated = not 0 < radius <= 32
+            if estimated:
+                # Match the reference reader for missing hitbox dimensions.
+                # This is an estimate, not a guarantee of collision geometry.
+                radius = 3.0
+            result.append(Bullet(slot, x, y, vx, vy, radius, state, estimated))
         return tuple(result)
 
     def close(self):

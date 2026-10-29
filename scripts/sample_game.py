@@ -50,6 +50,7 @@ def run(args, emit):
                 data = asdict(sample)
                 data.pop("bullets")
                 data["bullet_count"] = len(sample.bullets)
+                data["radius_fallback_slots"] = [b.slot for b in sample.bullets if b.radius_estimated]
                 emit({"event": "sample", **data})
                 time.sleep(0.1)
         finally:

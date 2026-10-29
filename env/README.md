@@ -2,6 +2,10 @@
 
 - `memory_reader.py`: Immutable snapshots and bulk bullet reads. Rejects short,
   invalid, and frame-crossing samples. Resolves profiles by executable hash.
+  Missing hitbox dimensions use the reference reader's 3 px radius estimate.
+  Estimated bullets remain in observations and are marked in diagnostic info
+  (`radius_fallback_count` and `radius_fallback_slots`). Invalid positions,
+  velocities, and short reads still raise errors.
 - `windows.py`: Lazy Win32 bindings for process discovery, read-only memory
   access, and foreground-only scan-code input. No game-file writes or injection.
 - `action_emulator.py`: Nine directions, optional fixed Z/Shift, and owned-key
