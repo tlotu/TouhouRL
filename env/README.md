@@ -10,6 +10,8 @@
 - `frame_stepper.py`: Bounded real-time waiting using the byte frame counter.
   Measures actual elapsed frames; does not provide deterministic engine stepping.
 - `reset_controller.py`: Initial task attachment and opt-in failure-menu retry.
+  Waits for menu settling and uses bounded confirmation retries while the menu
+  stays visible. Stops confirming once a loading or playable state is observed.
   Rejects ordinary active-task resets and unsupported menus.
 - `session.py`: Single-life episode loop, padded observations, event rewards,
   frame limits, fault handling, and cleanup. Usable without Gymnasium.

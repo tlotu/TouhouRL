@@ -1,6 +1,8 @@
 import contextlib
 import io
 import unittest
+from pathlib import Path
+import tempfile
 
 from env.action_emulator import ActionEmulator, InputError
 from env.session import GameSession
@@ -9,6 +11,23 @@ from tests.fakes import FakeClock, FakeKeyboard, FakeReader, sample
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_existing_logs_are_preserved_and_numbered(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            requested = Path(directory) / "check.jsonl"
+            requested.write_text("original\n", encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with DiagnosticLog(requested) as log:
+                    first = log.path
+                    log.emit({"event": "first"})
+                with DiagnosticLog(requested) as log:
+                    second = log.path
+                    log.emit({"event": "second"})
+            self.assertEqual(requested.read_text(encoding="utf-8"), "original\n")
+            self.assertEqual(first.name, "check-001.jsonl")
+            self.assertEqual(second.name, "check-002.jsonl")
+            self.assertIn('"first"', first.read_text(encoding="utf-8"))
+            self.assertIn('"second"', second.read_text(encoding="utf-8"))
+
     def test_ten_failures_with_nine_automatic_retries(self):
         samples = [sample(), sample(frame=11)]
         for episode in range(10):
@@ -22,6 +41,7 @@ class DiagnosticTests(unittest.TestCase):
         rows = []
         with GameSession(reader, controls, spell_retry=True,
                          clock=clock, sleep=clock.sleep) as session:
+            session.resetter.menu_settle = 0
             run_episodes(session, 10, rows.append)
         self.assertEqual(rows[-1]["completed_episodes"], 10)
         self.assertEqual(rows[-1]["observed_retries"], 9)

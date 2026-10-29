@@ -15,8 +15,10 @@ class SessionTests(unittest.TestCase):
         self.keyboard = FakeKeyboard()
         self.reader = FakeReader(sample(), sample(frame=11), *following)
         self.controls = ActionEmulator(self.keyboard)
-        return GameSession(self.reader, self.controls, clock=self.clock,
-                           sleep=self.clock.sleep, **kwargs)
+        session = GameSession(self.reader, self.controls, clock=self.clock,
+                              sleep=self.clock.sleep, **kwargs)
+        session.resetter.menu_settle = 0
+        return session
 
     def test_real_observation_and_time_reward(self):
         session = self.make_session(sample(frame=13, lives=0))

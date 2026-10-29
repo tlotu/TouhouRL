@@ -86,7 +86,7 @@ class ControlsTests(unittest.TestCase):
 
     def resetter(self, reader, spell_retry=False):
         return ResetController(reader, self.controls, spell_retry, timeout=0.2,
-                               clock=self.clock, sleep=self.clock.sleep)
+                               clock=self.clock, sleep=self.clock.sleep, menu_settle=0)
 
     def test_first_reset_requires_advancing_frames(self):
         reader = FakeReader(sample(), sample(), sample(frame=11))
@@ -114,3 +114,40 @@ class ControlsTests(unittest.TestCase):
         with self.assertRaises(ResetError):
             self.resetter(FakeReader(sample(retry=True)), True).reset()
         self.assertEqual(self.keyboard.events, [("down", "z"), ("up", "z")])
+
+    def test_new_failure_menu_settles_and_recovers_a_missed_confirm(self):
+        presses = []
+        original_down = self.keyboard.key_down
+        def down(key):
+            presses.append(self.clock())
+            original_down(key)
+        self.keyboard.key_down = down
+        reader = FakeReader(sample(retry=True))
+        reader.snapshot = lambda: (sample(retry=True) if len(presses) < 2
+                                   else sample(frame=11))
+        controller = ResetController(reader, self.controls, True, timeout=3,
+                                     clock=self.clock, sleep=self.clock.sleep)
+        self.assertTrue(controller.reset().ready)
+        self.assertEqual(len(presses), 2)
+        self.assertGreaterEqual(presses[0], 0.35)
+        self.assertGreaterEqual(presses[1] - presses[0], 0.75)
+        self.assertFalse(self.controls.held)
+
+    def test_confirm_retries_are_bounded_and_timeout_has_state(self):
+        controller = ResetController(FakeReader(sample(retry=True)), self.controls,
+                                     True, timeout=4, clock=self.clock, sleep=self.clock.sleep)
+        with self.assertRaisesRegex(ResetError, "confirms=3.*retry=True"):
+            controller.reset()
+        self.assertEqual(self.keyboard.events.count(("down", "z")), 3)
+
+    def test_no_more_confirmations_after_leaving_failure_menu(self):
+        presses = []
+        self.keyboard.key_down = lambda key: presses.append(key)
+        reader = FakeReader(sample())
+        reader.snapshot = lambda: (sample(retry=True) if not presses
+                                   else sample(scene=12))
+        controller = ResetController(reader, self.controls, True, timeout=2,
+                                     clock=self.clock, sleep=self.clock.sleep)
+        with self.assertRaisesRegex(ResetError, "left_menu=True"):
+            controller.reset()
+        self.assertEqual(presses, ["z"])

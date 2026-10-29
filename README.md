@@ -43,8 +43,9 @@ The diagnostic sends random nine-direction movement with Z and Shift held.
 It can lose the challenge. It releases owned keys on termination, errors,
 focus loss, and Ctrl+C. It never selects difficulty, character, or spells.
 `Game window lost focus` deliberately aborts the check. Initial focus is awaited;
-mid-task focus loss never silently resumes the same episode. Use a new log path
-for each run. The JSONL log records resets, episode endings, summaries, and errors.
+mid-task focus loss never silently resumes the same episode. Existing log names
+receive a numbered suffix automatically; the actual path is printed at startup.
+The JSONL log records resets, episode endings, summaries, and errors.
 Ten completed failure episodes with nine observed retries validate repeated
 failure handling, not successful spell completion.
 `--spell-retry` is an explicit task-context assertion: the available memory

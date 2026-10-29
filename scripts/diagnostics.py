@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import random
+import sys
 
 
 class DiagnosticLog:
@@ -12,7 +13,19 @@ class DiagnosticLog:
     def __enter__(self):
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.file = self.path.open("x", encoding="utf-8")
+            requested = self.path
+            for index in range(10000):
+                candidate = (requested if index == 0 else
+                             requested.with_name(f"{requested.stem}-{index:03d}{requested.suffix}"))
+                try:
+                    self.file = candidate.open("x", encoding="utf-8")
+                except FileExistsError:
+                    continue
+                self.path = candidate
+                break
+            else:
+                raise FileExistsError(f"No unused log name available for {requested}")
+            print(f"Diagnostic log: {self.path}", file=sys.stderr)
         return self
 
     def emit(self, record):
