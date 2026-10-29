@@ -42,12 +42,12 @@ def save_checkpoint(learner, run_dir, state, config, build):
     return target
 
 
-def read_checkpoint(path):
+def read_checkpoint(path, *, evaluation=False):
     path = Path(path)
     metadata = json.loads((path / "metadata.json").read_text(encoding="utf-8"))
     if (metadata.get("format") != 1 or metadata.get("complete") is not True
             or metadata.get("schema") != OBSERVATION_SCHEMA
-            or metadata.get("reward_profile") != REWARD_PROFILE
+            or metadata.get("reward_profile") not in (("spell-v1", REWARD_PROFILE) if evaluation else (REWARD_PROFILE,))
             or not (path / "model.zip").is_file()):
         raise ValueError("Incomplete or incompatible training checkpoint")
     if not isinstance(metadata.get("timesteps"), int) or not isinstance(metadata.get("updates"), int):

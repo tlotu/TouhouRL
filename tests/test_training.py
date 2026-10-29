@@ -56,11 +56,23 @@ class TrainingTests(unittest.TestCase):
         self.assertFalse(learner.batches)
         self.assertEqual(rows[-1]["policy"], "ppo_deterministic")
         self.assertEqual(rows[-1]["successful_episodes"], 1)
+        ended = next(row for row in rows if row["event"] == "episode_end")
+        self.assertEqual(ended["action_counts"], [0, 0, 0, 2, 0, 0, 0, 0, 0])
 
     def test_reward_prioritizes_spell_outcome(self):
-        self.assertAlmostEqual(training_reward({"delta_frames": 2, "reason": "spell_success"}), 4.998)
-        self.assertAlmostEqual(training_reward({"delta_frames": 2, "reason": "spell_failure"}), -1.002)
-        self.assertEqual(training_reward({"delta_frames": 2, "reason": None}), -0.002)
+        self.assertAlmostEqual(training_reward({"delta_frames": 2, "reason": "spell_success"}), 5.001)
+        self.assertAlmostEqual(training_reward({"delta_frames": 2, "reason": "spell_failure"}), -0.999)
+        self.assertEqual(training_reward({"delta_frames": 2, "reason": None}), 0.001)
+
+    def test_longer_survival_improves_failed_episode_return(self):
+        def failed_return(frames):
+            return sum(training_reward({"delta_frames": 2, "reason": None})
+                       for _ in range(frames // 2 - 1)) + training_reward(
+                           {"delta_frames": 2, "reason": "spell_failure"})
+        self.assertGreater(failed_return(900), failed_return(438))
+        # Even the longest default failure earns less than an immediate success.
+        self.assertLess(failed_return(3600), training_reward(
+            {"delta_frames": 0, "reason": "spell_success"}))
 
     def test_collection_finishes_episode_and_marks_boundaries(self):
         task = FakeTask()

@@ -60,6 +60,8 @@ class GameSession:
         return {"reason": reason, "frame": s.frame, "scene": s.scene,
                 "lives": s.lives, "bombs": s.bombs, "deaths": s.deaths,
                 "dying": s.dying, "retry": s.retry,
+                "player_x": s.x if s.running else None,
+                "player_y": s.y if s.running else None,
                 "bullet_count": len(s.bullets),
                 "enemy_count": len(s.enemies),
                 "dropped_enemies": max(0, len(s.enemies) - ENEMY_CAPACITY),

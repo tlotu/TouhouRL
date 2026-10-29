@@ -32,7 +32,7 @@ def main():
         parser.error("timesteps must be >=2 and focus-timeout in (0,60]")
     if args.episodes <= 0 or (args.evaluate and not args.resume):
         parser.error("episodes must be positive; --evaluate requires --resume")
-    saved = read_checkpoint(args.resume) if args.resume else None
+    saved = read_checkpoint(args.resume, evaluation=args.evaluate) if args.resume else None
     defaults = {"rollout_steps": 512, "capacity": 128, "max_frames": 3600, "seed": 0}
     config = dict(saved["config"] if saved else defaults)
     for name in defaults:

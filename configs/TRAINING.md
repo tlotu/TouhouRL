@@ -38,14 +38,20 @@ final minibatches. True terminal boundaries use zero bootstrap; GAE does not
 cross episode starts. Artificial time-limit truncations are rejected rather than
 misrepresented as terminal training examples.
 
-## Reward profile spell-v1
+## Reward profile spell-v2
 
-Reward is -0.001 per observed elapsed logic frame, +5 at recognized success, and
+Reward is +0.0005 per observed elapsed logic frame, +5 at recognized success, and
 -1 at recognized failure. This differs from the diagnostic survival reward;
 both returns are logged. No HP deltas, alignment reward, teacher actions, or win
 inference from quiet screens are used. Outcomes are observed at result-menu
 boundaries, not necessarily the final damaging frame. Gamma applies per decision,
 not per native frame. Training starts from random weights, not the rule policy.
+The default 3600-frame limit caps survival credit at 1.8. Longer configured
+limits change this balance. No reward depends on staying near the bottom.
+
+Historical spell-v1 used a time penalty that favored earlier failures when no
+success was found. Its checkpoints remain available for evaluation only; start
+a fresh run for spell-v2 rather than silently resuming with a different reward.
 
 ## Checkpoints and continuation
 
@@ -76,8 +82,29 @@ and Torch 2.15.0: 514 transitions, two failed episodes, one PPO update, and a
 completed update-000001 checkpoint. Sampling took 21.046 seconds (24.42
 transitions/second); optimization took 0.125 seconds. KL was 0.00284 and clipping
 fraction 0.00738. This validates one collection/update/save cycle, not learning
-quality or multi-update continuation. Next, resume for 2048 additional steps
-under the same spell/character/difficulty, then evaluate separately.
+quality. Multi-update continuation passed in runs/ppo-continued/training.jsonl:
+2170 additional transitions, eight failed episodes, and four further updates.
+The final update-000005 checkpoint contains 2684 cumulative transitions. All
+updates completed without logged errors; KL ranged from 0.00429 to 0.00646.
+Sampling took 87.971 seconds and optimization took 0.515 seconds in total.
+Deterministic evaluation in runs/ppo-evaluation/training.jsonl completed ten
+failed episodes, each lasting 438 logic frames (7.3 seconds), with no dropped
+bullets or radius fallbacks. Periodic action samples repeatedly selected down
+and down-diagonal movements. Positions were not logged in this historical run,
+so bottom-boundary contact is a user observation, not a measured conclusion.
+This prompted spell-v2. New diagnostic logs include player coordinates during
+combat and per-episode counts for all nine actions (stay, up, up-right, right,
+down-right, down, down-left, left, up-left).
+
+The spell-v2 native run in runs/ppo-v2/training.jsonl completed 4178 transitions,
+15 failed episodes, and seven updates without logged errors. Checkpoint
+update-000007 records this budget and reward profile. Mean episode duration was
+556.67 logic frames (9.28 seconds), with a range of 348 to 1034 frames. KL ranged
+from 0.00168 to 0.01118. Final policy entropy was approximately 2.176 nats, close
+to the nine-action uniform entropy of 2.197. Training samples actions from the
+policy, whereas the historical evaluation selected the highest-probability
+action. Random-looking training motion is therefore not evidence of improvement
+over that evaluation. Evaluate update-000007 separately before judging quality.
 
 At nominal 60 logic FPS and repeat=2, one instance yields at most about 30
 transitions/second before reset/update overhead. More rendering FPS, a different

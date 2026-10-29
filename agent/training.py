@@ -5,7 +5,7 @@ import math
 import time
 
 
-REWARD_PROFILE = "spell-v1"
+REWARD_PROFILE = "spell-v2"
 
 
 class TrainingError(RuntimeError):
@@ -30,12 +30,12 @@ class Transition:
 
 
 def training_reward(info):
-    """Favor spell completion, with a small cost per elapsed logic frame."""
+    """Reward survival and verified spell completion."""
     frames = info["delta_frames"]
     if not isinstance(frames, int) or frames < 0:
         raise TrainingError("Invalid elapsed frame count")
     bonus = 5.0 if info["reason"] == "spell_success" else -1.0 if info["reason"] == "spell_failure" else 0.0
-    return bonus - 0.001 * frames
+    return bonus + 0.0005 * frames
 
 
 def collect_episodes(env, learner, minimum_steps, emit):

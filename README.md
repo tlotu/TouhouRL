@@ -338,7 +338,7 @@ with the training dependencies installed.
 Select the spell manually and enter its success or failure RESULT menu. Then:
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.train --timesteps 512 --rollout-steps 512 --run-dir runs/ppo-smoke
+.\.venv\Scripts\python.exe -m scripts.train --timesteps 512 --rollout-steps 512 --run-dir runs/ppo-smoke-v2
 ```
 
 Keep the game focused after the prompt. This starts from random policy weights.
@@ -349,17 +349,22 @@ episode can exceed the requested budget. Existing run names get numeric suffixes
 Resume from the actual printed checkpoint path for additional transitions:
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.train --resume runs/ppo-smoke/checkpoints/update-000001 --timesteps 2048 --run-dir runs/ppo-continued
+.\.venv\Scripts\python.exe -m scripts.train --resume runs/ppo-smoke-v2/checkpoints/update-000001 --timesteps 2048 --run-dir runs/ppo-continued-v2
 ```
 
 Evaluate without updating, again starting in the selected spell's result menu:
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.train --evaluate --resume runs/ppo-smoke/checkpoints/update-000001 --episodes 3 --run-dir runs/ppo-evaluation
+.\.venv\Scripts\python.exe -m scripts.train --evaluate --resume runs/ppo-smoke-v2/checkpoints/update-000001 --episodes 3 --run-dir runs/ppo-evaluation-v2
 ```
 
 The native smoke run completed 514 transitions across two failed episodes, one
 PPO update, and checkpoint saving. Sampling averaged 24.42 transitions/second;
-the update took 0.125 seconds. Multi-update continuation and policy quality still
-need validation. See configs/TRAINING.md for reward semantics, fault handling,
+the update took 0.125 seconds. Continuation also passed: eight episodes, four
+further updates, and 2684 cumulative transitions saved in
+runs/ppo-continued/checkpoints/update-000005. All training episodes failed;
+Historical deterministic evaluation failed all ten episodes at 438 frames each.
+New training uses spell-v2 survival credit instead of spell-v1's time penalty;
+old checkpoints are evaluation-only. Start a fresh run for the new reward.
+See configs/TRAINING.md for reward semantics, fault handling,
 and limits. No acceleration or remote machine is used.

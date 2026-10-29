@@ -59,9 +59,11 @@ def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False, 
             resets += 1
             emit({"event": "reset", "episode": episode, **info})
             steps = 0
+            action_counts = [0] * 9
             episode_return = 0.0
             while True:
                 action = choose(obs)
+                action_counts[action] += 1
                 next_obs, reward, terminated, truncated, info = session.step(action)
                 transitions += 1
                 max_bullets = max(max_bullets, info.get("bullet_count", 0))
@@ -88,7 +90,7 @@ def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False, 
                     classified_failures += int(reason == "spell_failure")
                     total_frames += info["elapsed_frames"]
                     emit({"event": "episode_end", "episode": episode, "steps": steps,
-                          "return": episode_return, **info})
+                          "return": episode_return, "action_counts": action_counts, **info})
                     if reason == "quiet_after_combat":
                         emit({"event": "manual_review", "episode": episode,
                               "message": "Combat became quiet. Check the result screen; success is not inferred. "

@@ -7,6 +7,25 @@ from agent.checkpoints import create_run_directory, read_checkpoint, save_checkp
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_old_reward_checkpoint_is_evaluation_only(self):
+        class Learner:
+            def save(self, path):
+                Path(path).write_bytes(b"fake-model")
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            saved = save_checkpoint(Learner(), directory,
+                                    {"updates": 1, "timesteps": 6}, {}, "test-build")
+            file = saved / "metadata.json"
+            metadata = json.loads(file.read_text())
+            metadata["reward_profile"] = "spell-v1"
+            file.write_text(json.dumps(metadata))
+            with self.assertRaises(ValueError):
+                read_checkpoint(saved)
+            self.assertEqual(read_checkpoint(saved, evaluation=True)["reward_profile"], "spell-v1")
+            metadata["reward_profile"] = "unknown"
+            file.write_text(json.dumps(metadata))
+            with self.assertRaises(ValueError):
+                read_checkpoint(saved, evaluation=True)
+
     def test_publish_load_and_duplicate_preservation(self):
         class Learner:
             def save(self, path):
