@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--policy", choices=("random", "stay", "reactive", "reactive_attack"), default="random")
     parser.add_argument("--capacity", type=int, default=64, help="Maximum observed bullets (1-640)")
     parser.add_argument("--trace", action="store_true", help="Record every observation/action transition")
+    parser.add_argument("--task", help="Manual spell/character/difficulty label for demonstrations")
     parser.add_argument("--quiet-limit", type=int, default=0,
                         help="Stop after N bullet-free frames following combat; not a success detector")
     args = parser.parse_args()
@@ -46,7 +47,9 @@ def main():
     if not 0 < args.focus_timeout <= 60:
         parser.error("focus-timeout must be in (0, 60]")
     with DiagnosticLog(args.output) as log:
-        run(args, log.emit)
+        def emit(record):
+            log.emit(record, console=record.get("event") != "transition")
+        run(args, emit)
 
 
 def run(args, emit):
@@ -55,7 +58,7 @@ def run(args, emit):
           "run": args.run, "spell_retry": args.spell_retry, "repeat": args.repeat,
           "seed": args.seed, "max_frames": args.max_frames, "policy": args.policy,
           "capacity": args.capacity, "trace": args.trace, "quiet_limit": args.quiet_limit,
-          "schema": OBSERVATION_SCHEMA})
+          "schema": OBSERVATION_SCHEMA, "task": getattr(args, "task", None)})
     if not args.run:
         try:
             for _ in range(args.samples):

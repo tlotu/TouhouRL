@@ -73,6 +73,8 @@ def main():
             log.emit({"event": "evaluation_start" if args.evaluate else "training_start", "pid": pid, "build_md5": build,
                       "config": config, "additional_steps": args.timesteps,
                       "resume": args.resume, "starting_steps": learner.timesteps,
+                      "initialization": saved.get("initialization", {}).get("method", "random") if saved else "random",
+                      "task": saved.get("initialization", {}).get("identity", {}).get("task") if saved else None,
                       "sb3_version": importlib.metadata.version("stable-baselines3"),
                       "torch_version": importlib.metadata.version("torch")})
             print("Start from a spell RESULT menu. Focus the game within "
@@ -84,6 +86,8 @@ def main():
                              action_fn=learner.deterministic_action)
                 return
             def checkpoint(state):
+                if saved and "initialization" in saved:
+                    state = {**state, "initialization": saved["initialization"]}
                 return save_checkpoint(learner, run_dir, state, config, build)
             if not saved:
                 initial = checkpoint({"updates": 0, "timesteps": 0})

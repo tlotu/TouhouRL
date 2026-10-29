@@ -5,6 +5,14 @@ import numpy as np
 from .session import ENEMY_CAPACITY
 
 
+def state_space(capacity):
+    return spaces.Dict({
+        "player": spaces.Box(-1, 1, (4,), dtype=np.float32),
+        "bullets": spaces.Box(-1, 1, (capacity, 7), dtype=np.float32),
+        "enemies": spaces.Box(-1, 1, (ENEMY_CAPACITY, 6), dtype=np.float32),
+    })
+
+
 class TouhouEnv(gym.Env):
     metadata = {"render_modes": []}
 
@@ -12,11 +20,7 @@ class TouhouEnv(gym.Env):
         super().__init__()
         self.session = session
         self.action_space = spaces.Discrete(9)
-        self.observation_space = spaces.Dict({
-            "player": spaces.Box(-1, 1, (4,), dtype=np.float32),
-            "bullets": spaces.Box(-1, 1, (session.capacity, 7), dtype=np.float32),
-            "enemies": spaces.Box(-1, 1, (ENEMY_CAPACITY, 6), dtype=np.float32),
-        })
+        self.observation_space = state_space(session.capacity)
 
     @staticmethod
     def _arrays(obs):

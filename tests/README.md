@@ -45,3 +45,9 @@ python -m unittest discover -s tests -v
 
 Tests do not start the game, send real keys, or require a GPU. Passing these tests
 does not validate live addresses or the spell failure-menu default selection.
+
+`test_demonstrations.py` checks complete episode splits, incomplete tails,
+failure opt-in, duplicate data, invalid actions/shapes, and sequence integrity.
+`test_cloning.py` runs actual offline fitting on synthetic teacher data, checks
+validation improvement, reloads the published archive, and performs a PPO update.
+It requires the optional training dependencies and sends no native input.

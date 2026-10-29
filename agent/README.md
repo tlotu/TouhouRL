@@ -22,3 +22,8 @@ acceleration, and future spawns are still outside the model. HP is not an input.
 auto-reset learn() loop. `checkpoints.py` publishes complete policy/optimizer
 checkpoints with build/schema/reward metadata. Optional dependencies are in
 requirements-training.txt; see configs/TRAINING.md before the first live run.
+
+`demonstrations.py` validates teacher JSONL and splits complete episodes into
+training/validation sets. `cloning.py` fits the actor offline and selects weights
+by held-out cross-entropy. Source hashes, episode splits, and per-action metrics
+are stored with PPO-compatible checkpoints. See configs/IMITATION.md.

@@ -65,3 +65,9 @@ Old state-v1 traces do not have that input and must not be silently mixed with v
 frames following observed combat. This is a manual-review truncation, not a
 success detector. It releases keys and stops multi-episode execution without
 sending success-menu input. Initial bullet-free frames do not trigger it.
+
+For demonstrations, add --task with a fixed spell/character/difficulty label and
+use --policy reactive_attack --trace --capacity 128. Full transitions are saved
+without console output. `clone.py` fits a fresh actor offline from complete
+teacher episodes, writes held-out metrics, and publishes update-000000 for
+evaluation or PPO continuation. See configs/IMITATION.md for the workflow.

@@ -324,6 +324,10 @@ optimization; engine pause/resume and fixed-step control remain unimplemented.
 
 ## Small PPO training
 
+For teacher demonstration collection and offline behavior cloning before PPO,
+see [configs/IMITATION.md](configs/IMITATION.md). This path uses reactive_attack
+as a teacher and evaluates the cloned actor before fine-tuning.
+
 Install optional training dependencies, then run the offline tests first:
 
 ```powershell

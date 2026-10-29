@@ -104,7 +104,45 @@ from 0.00168 to 0.01118. Final policy entropy was approximately 2.176 nats, clos
 to the nine-action uniform entropy of 2.197. Training samples actions from the
 policy, whereas the historical evaluation selected the highest-probability
 action. Random-looking training motion is therefore not evidence of improvement
-over that evaluation. Evaluate update-000007 separately before judging quality.
+over that evaluation.
+
+Deterministic evaluation of spell-v2 update-000007 in
+runs/ppo-v2-evaluation/training.jsonl completed ten failures at exactly 380
+frames each (6.33 seconds), with identical action counts: 112 down, 28 down-left,
+and 50 up per episode. Sampled positions showed y=432 through frame 240,
+followed by upward movement to y=237 at frame 360. All nine retries completed;
+no bullets were dropped and no radius fallbacks occurred. This checkpoint has
+not demonstrated effective avoidance. The identical episodes are repeated
+trajectories under these conditions, not broad independent coverage. Keep
+spell-v2 fixed for a longer continuation before changing rewards again; seven
+updates and fifteen training episodes provide little learning evidence.
+
+Continuation in runs/ppo-v2-20k/training.jsonl completed 20053 additional
+transitions and 29 further updates, reaching 24231 transitions at update-000036.
+All 76 episodes failed; mean duration was 527.14 frames (8.79 seconds), with a
+range of 309 to 1680 frames. First-half and second-half means were 536.21 and
+518.08 frames, so this run shows no sustained survival improvement. Final
+entropy was about 1.971 nats; increasing action preference alone does not prove
+better avoidance. No errors were logged and the final checkpoint was published.
+Evaluate update-000036 before allocating another large training budget. Three
+deterministic episodes suffice for an initial behavior check; identical retries
+should not be interpreted as independent generalization evidence.
+
+Evaluation of update-000036 in
+runs/ppo-v2-20k-evaluation-001/training.jsonl failed all three episodes after
+118 frames (1.97 seconds). Every episode selected up for all 59 decisions.
+At frame 60 the player was at (192, 239), directly below a collidable boss at
+(192, 96); no bullets were observed before termination. The user observed body
+contact. This is consistent with the trajectory, but the result flag itself
+does not identify the collision source. Enemy relative position and collidable
+status are already in state-v2, so this is not a missing enemy-position input.
+Stop scaling this checkpoint. A useful next experiment is behavior cloning
+from the validated reactive_attack policy, followed by evaluation and PPO
+fine-tuning. Keep that experiment separate from the pure-PPO baseline and
+record demonstration coverage and held-out imitation accuracy. No cloning
+model has been validated in the native game yet. The offline pipeline is now
+implemented; see IMITATION.md for collection, held-out fitting, evaluation, and
+PPO continuation. Its automated tests use synthetic teacher traces.
 
 At nominal 60 logic FPS and repeat=2, one instance yields at most about 30
 transitions/second before reset/update overhead. More rendering FPS, a different
