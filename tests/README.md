@@ -1,5 +1,16 @@
 # Offline tests
 
+Training checks:
+
+- `test_training.py`: Complete-episode collection, transition alignment, reward
+  profile, rejection of unknown/truncated endings, update boundaries, and budgets.
+- `test_training_boundary.py`: Native session boundary guards.
+- `test_checkpoints.py`: Publication, continuation metadata, duplicate names,
+  and interrupted saves.
+- `test_ppo_backend.py`: Actual optimizer update, model/optimizer restoration,
+  and GAE episode boundaries. These two tests skip without Torch and SB3;
+  install requirements-training.txt and run them before live training.
+
 Run from the source directory:
 
 ```powershell

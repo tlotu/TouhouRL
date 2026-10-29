@@ -45,9 +45,9 @@ class DiagnosticLog:
                 self.file.close()
 
 
-def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False):
+def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False, action_fn=None):
     """Report every reset and terminal event, including partially failed runs."""
-    choose = make_policy(policy, seed)
+    choose = make_policy(policy, seed) if action_fn is None else action_fn
     resets = completed = failures = successes = classified_failures = 0
     total_frames = 0
     reason = None

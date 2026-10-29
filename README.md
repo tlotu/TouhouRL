@@ -1,8 +1,8 @@
 # TouhouRL
 
 An early reinforcement-learning environment for **th06nc.exe** on Windows x64.
-The current milestone is a real-time, single-life spell-practice loop. PPO and
-screen capture are not implemented yet.
+The current environment is a real-time, single-life spell-practice loop. A small
+CPU PPO training entry point is implemented; screen capture is not implemented.
 
 ## Setup
 
@@ -321,3 +321,45 @@ The next training stage should collect complete episodes and update the policy
 while the verified result menu remains active. Resume with reset only after the
 update finishes. This avoids leaving movement held in a running battle during
 optimization; engine pause/resume and fixed-step control remain unimplemented.
+
+## Small PPO training
+
+Install optional training dependencies, then run the offline tests first:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-training.txt
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+The two test_ppo_backend tests must run rather than skip. They check an actual
+optimizer update, GAE boundaries, and checkpoint loading. All 120 tests now pass
+with the training dependencies installed.
+
+Select the spell manually and enter its success or failure RESULT menu. Then:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.train --timesteps 512 --rollout-steps 512 --run-dir runs/ppo-smoke
+```
+
+Keep the game focused after the prompt. This starts from random policy weights.
+It collects at least 512 transitions, finishes the current episode, updates in
+the result menu, saves a checkpoint, and leaves the menu open. The final complete
+episode can exceed the requested budget. Existing run names get numeric suffixes.
+
+Resume from the actual printed checkpoint path for additional transitions:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.train --resume runs/ppo-smoke/checkpoints/update-000001 --timesteps 2048 --run-dir runs/ppo-continued
+```
+
+Evaluate without updating, again starting in the selected spell's result menu:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.train --evaluate --resume runs/ppo-smoke/checkpoints/update-000001 --episodes 3 --run-dir runs/ppo-evaluation
+```
+
+The native smoke run completed 514 transitions across two failed episodes, one
+PPO update, and checkpoint saving. Sampling averaged 24.42 transitions/second;
+the update took 0.125 seconds. Multi-update continuation and policy quality still
+need validation. See configs/TRAINING.md for reward semantics, fault handling,
+and limits. No acceleration or remote machine is used.

@@ -45,3 +45,8 @@ is not valid for this screen. The baseline profile now provides
 `Snapshot.result_menu`, settled outcome classification, and selection-aware retry.
 Quiet-combat heuristics never authorize menu input. Other profiles retain legacy
 detection. Unexpected phases, invalid reads, and focus loss stop input.
+
+`GameSession.verify_training_boundary()` requires an ended session and a settled
+recognized result menu, releases owned keys, and checks foreground focus. The
+PPO loop calls it before and after optimization; it does not advance or reset
+the task. Model updates are never allowed inside an active episode.

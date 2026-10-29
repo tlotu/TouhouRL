@@ -17,5 +17,8 @@ vertically. Without a suitable target it falls back to `reactive`.
 This is predicted bullet safety, not a guarantee: lasers, enemy body hitboxes,
 acceleration, and future spawns are still outside the model. HP is not an input.
 
-PPO is not implemented yet. Update-time game control and successful spell ending
-must be addressed before unattended training.
+`training.py` collects complete episodes and checks result-menu update boundaries.
+`ppo_backend.py` uses SB3 PPO/GAE with variable-length batches, bypassing its
+auto-reset learn() loop. `checkpoints.py` publishes complete policy/optimizer
+checkpoints with build/schema/reward metadata. Optional dependencies are in
+requirements-training.txt; see configs/TRAINING.md before the first live run.

@@ -156,6 +156,17 @@ class GameSession:
             self.reader.close()
             self.closed = True
 
+    def verify_training_boundary(self):
+        """Updates are allowed only after termination, in a recognized menu."""
+        if self.active or self.closed:
+            raise RuntimeError("Training update requires an ended, open session")
+        self.controls.release_all()
+        self.controls.check_focus()
+        current = self.reader.snapshot()
+        if current.result_menu is None or current.result_menu.outcome is None:
+            raise RuntimeError("Training boundary is no longer a settled spell-result menu")
+        return current.result_menu.outcome
+
     def __enter__(self):
         return self
 

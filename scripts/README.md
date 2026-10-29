@@ -1,5 +1,18 @@
 # Entry points
 
+## PPO
+
+`python -m scripts.train` collects complete episodes and updates SB3 PPO only in
+recognized result menus. Install requirements-training.txt first. Start with
+`--timesteps 512 --rollout-steps 512`; budgets are minimum transition counts.
+`--run-dir` selects an artifact directory (collisions get suffixes). `--resume`
+loads a completed checkpoint directory for additional timesteps. `--evaluate`
+requires --resume and uses deterministic actions for --episodes without updating.
+The game must begin at the manually selected spell's result menu and stay focused.
+See configs/TRAINING.md for rewards, checkpoint rules, and remaining limits.
+
+## Diagnostics
+
 Run commands from the TouhouRL source directory.
 
 `python -m scripts.sample_game` performs read-only state sampling. `--samples`

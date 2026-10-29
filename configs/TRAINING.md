@@ -1,0 +1,85 @@
+# Small complete-episode PPO
+
+## Execution contract
+
+Select a fixed spell/character/difficulty manually and start at a recognized
+result menu on the validated baseline build. Use one CPU learner, fixed Z/Shift,
+repeat=2, and state-v2 observations. Default bullet capacity is 128. Raw HP stays
+diagnostic only. Keep the game focused and do not navigate during updates.
+
+Collect with fixed policy weights until the batch reaches its minimum length,
+then finish that episode. Several complete episodes may form one update. The
+terminal result releases keys. Verify settled result state and focus immediately
+before and after updating; reset only afterward. Menu animation still runs:
+this is not engine pause or exact stepping.
+
+SB3 supplies PPO losses, clipping, GAE, minibatches, optimizer, and serialization.
+The custom collector bypasses SB3's auto-reset vector loop. Calling model.learn()
+would violate this contract. The backend instead populates a complete-episode
+DictRolloutBuffer and calls train(). Run the optional optimizer tests whenever
+upgrading SB3 because this uses its lower-level buffer/train interfaces.
+
+## Defaults
+
+| Parameter | Value |
+| --- | --- |
+| Minimum rollout transitions | 512 |
+| Actor/critic hidden layers | 128, 128 each |
+| Learning rate | 0.0003, constant |
+| Minibatch size / epochs | 64 / 4 |
+| Gamma / GAE lambda | 0.999 / 0.95 |
+| Clip / entropy coefficient | 0.2 / 0.01 |
+| KL target | 0.03 |
+| Compute | CPU, one Torch thread |
+| Per-episode frame limit | 3600 |
+
+Variable batches can exceed the minimum rollout length. SB3 handles partial
+final minibatches. True terminal boundaries use zero bootstrap; GAE does not
+cross episode starts. Artificial time-limit truncations are rejected rather than
+misrepresented as terminal training examples.
+
+## Reward profile spell-v1
+
+Reward is -0.001 per observed elapsed logic frame, +5 at recognized success, and
+-1 at recognized failure. This differs from the diagnostic survival reward;
+both returns are logged. No HP deltas, alignment reward, teacher actions, or win
+inference from quiet screens are used. Outcomes are observed at result-menu
+boundaries, not necessarily the final damaging frame. Gamma applies per decision,
+not per native frame. Training starts from random weights, not the rule policy.
+
+## Checkpoints and continuation
+
+Each run writes training.jsonl and checkpoints/update-NNNNNN. Update records
+include KL, clipping, entropy/value losses, sampling speed, update time, and the
+checkpoint path. Interrupted saves leave unpublished .pending directories;
+latest.json points to a completed checkpoint. Existing models are never replaced.
+Update 0 saves the initialized model before collecting the first batch.
+
+Resume restores policy, optimizer, cumulative timesteps, update number, and
+configuration. Build, observation schema, reward profile, and spaces must match.
+The --timesteps budget is additional work per invocation. Continuation uses a
+new run directory. Game state, native RNG, rollouts, and exact Python/Torch random
+streams are not restored; the game starts a fresh task.
+
+Focus loss, invalid memory, unknown endings, or truncation abort collection
+without training on the incomplete batch. Interrupted updates are not published.
+Resume from the last completed checkpoint, with the game in a result menu again.
+
+## Verification and scale
+
+All 120 tests passed with training dependencies installed, including actual
+optimizer updates, GAE boundaries, and checkpoint loading. Re-run the backend
+tests when upgrading Torch/SB3.
+
+Native smoke validation passed in runs/ppo-smoke/training.jsonl with SB3 2.9.2
+and Torch 2.15.0: 514 transitions, two failed episodes, one PPO update, and a
+completed update-000001 checkpoint. Sampling took 21.046 seconds (24.42
+transitions/second); optimization took 0.125 seconds. KL was 0.00284 and clipping
+fraction 0.00738. This validates one collection/update/save cycle, not learning
+quality or multi-update continuation. Next, resume for 2048 additional steps
+under the same spell/character/difficulty, then evaluate separately.
+
+At nominal 60 logic FPS and repeat=2, one instance yields at most about 30
+transitions/second before reset/update overhead. More rendering FPS, a different
+machine, or a GPU alone does not establish faster correct sampling. Acceleration,
+per-instance input, and parallel engines require separate development.
