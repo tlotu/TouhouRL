@@ -10,16 +10,16 @@ from .training import REWARD_PROFILE
 
 def _publish_directory(pending, target):
     # Windows can briefly deny directory renames after an archive is closed.
-    for attempt in range(5):
+    for attempt in range(8):
         if target.exists():
             raise FileExistsError(target)
         try:
             pending.rename(target)
             return
         except PermissionError:
-            if attempt == 4:
+            if attempt == 7:
                 raise
-            time.sleep(0.05 * (2 ** attempt))
+            time.sleep(min(0.5, 0.05 * (2 ** attempt)))
 
 
 def create_run_directory(requested):

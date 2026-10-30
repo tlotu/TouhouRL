@@ -14,16 +14,22 @@ from .training import Decision
 
 
 class PPOBackend:
-    def __init__(self, env, seed=0, rollout_steps=512, checkpoint=None):
+    def __init__(self, env, seed=0, rollout_steps=512, checkpoint=None, features="flat"):
         torch.set_num_threads(1)
         if checkpoint:
             self.model = PPO.load(checkpoint, env=env, device="cpu")
         else:
+            policy_kwargs = {"net_arch": {"pi": [128, 128], "vf": [128, 128]}}
+            if features == "hazard-v1":
+                from .hazard_features import HazardFeatures
+                policy_kwargs["features_extractor_class"] = HazardFeatures
+            elif features != "flat":
+                raise ValueError("Unknown feature extractor")
             self.model = PPO("MultiInputPolicy", env, device="cpu", seed=seed,
                              n_steps=rollout_steps, batch_size=64, n_epochs=4,
                              learning_rate=3e-4, gamma=0.999, gae_lambda=0.95,
                              clip_range=0.2, ent_coef=0.01, target_kl=0.03,
-                             policy_kwargs={"net_arch": {"pi": [128, 128], "vf": [128, 128]}})
+                             policy_kwargs=policy_kwargs)
         self.model.set_logger(Logger(folder=None, output_formats=[]))
         self.model.policy.set_training_mode(False)
         # Warm up tensor/inference initialization before attaching a live episode.

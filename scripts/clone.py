@@ -17,6 +17,7 @@ def main():
     parser.add_argument("--learning-rate", type=float, default=0.001)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--include-failures", action="store_true")
+    parser.add_argument("--features", choices=("flat", "hazard-v1"), default="flat")
     args = parser.parse_args()
     if (args.epochs < 1 or args.batch_size < 1 or not 0 < args.learning_rate <= 0.01
             or not 0 <= args.seed < 2**32):
@@ -43,10 +44,10 @@ def main():
     train_data, validation_data = stack_episodes(train), stack_episodes(validation)
     run_dir = create_run_directory(args.run_dir)
     with DiagnosticLog(run_dir / "cloning.jsonl") as log:
-        learner = PPOBackend(OfflineEnv(), seed=args.seed)
+        learner = PPOBackend(OfflineEnv(), seed=args.seed, features=args.features)
         config = {"rollout_steps": 512, "capacity": identity["capacity"],
-                  "max_frames": identity["max_frames"], "seed": args.seed}
-        provenance.update({"method": "behavior_cloning", "epochs": args.epochs,
+                  "max_frames": identity["max_frames"], "seed": args.seed, "features": args.features}
+        provenance.update({"method": "behavior_cloning", "epochs": args.epochs, "features": args.features,
                            "batch_size": args.batch_size, "learning_rate": args.learning_rate,
                            "seed": args.seed, "train_episode_ids": [ep["id"] for ep in train],
                            "validation_episode_ids": [ep["id"] for ep in validation],

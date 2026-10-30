@@ -8,6 +8,18 @@ from agent.checkpoints import create_run_directory, read_checkpoint, save_checkp
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_permanent_rename_denial_stays_unpublished(self):
+        from agent.checkpoints import _publish_directory
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            pending, target = Path(directory) / "pending", Path(directory) / "published"
+            pending.mkdir()
+            with patch.object(Path, "rename", side_effect=PermissionError("denied")) as rename, patch("agent.checkpoints.time.sleep"):
+                with self.assertRaises(PermissionError):
+                    _publish_directory(pending, target)
+            self.assertEqual(rename.call_count, 8)
+            self.assertTrue(pending.exists())
+            self.assertFalse(target.exists())
+
     def test_transient_rename_denial_is_retried_without_overwriting(self):
         from agent.checkpoints import _publish_directory
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:

@@ -32,3 +32,10 @@ are stored with PPO-compatible checkpoints. See configs/IMITATION.md.
 keeps executed actions distinct from supervised teacher labels and reports
 disagreement. Complete correction episodes can be aggregated with original
 teacher traces, including learner failures with valid teacher labels.
+
+`hazard_features.py` optionally replaces flattened observations with 62 geometric
+inputs for the actor/critic. It predicts bullet clearance for each action and
+adds boundary and attack geometry. Bullet order does not affect the result.
+It uses the baseline's approximate motion model, with no action override or
+teacher action input. Enable with scripts.clone --features hazard-v1; checkpoint
+loading restores the extractor for evaluation and PPO continuation.

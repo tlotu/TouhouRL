@@ -189,6 +189,63 @@ trace alignment across retries, failed correction inclusion, source aggregation,
 and rejection of corrupt labels or mismatched tasks. Native correction capture
 and the corrected model's game performance have not yet been validated.
 
-Checkpoint publication retries transient directory rename denials up to five
+## Corrected data and geometry feature experiment
+
+runs/demos/corrections-01.jsonl completed ten assisted episodes: four successes
+and six failures, 3720 transitions, no dropped bullets, no radius fallbacks, and
+no incomplete episodes. Student and teacher disagreed on 1388 states (37.31%).
+The teacher executed 1829 actions. All labels passed recomputation checks; all
+ten episodes were retained because supervision uses the teacher's suggestion.
+Combined with the original ten successes, the dataset has 8131 samples across
+20 episodes. The split holds out four episodes (1510 samples), leaving 16
+training episodes (6621 samples).
+
+The default flattened-MLP run in runs/bc-spell01-corrected/cloning.jsonl selected
+epoch 9 after 30 epochs. Validation accuracy was 64.17%, movement accuracy
+26.78%, and NLL 1.05423. Always staying still scores 60.93% on this validation
+set. Keep this model as a baseline rather than assuming more data solved the
+problem. Later training epochs lowered training loss but did not improve the
+selected validation loss.
+
+An explicit second experiment uses `--features hazard-v1`:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.clone --demos runs/demos/reactive-attack.jsonl runs/demos/corrections-01.jsonl --epochs 30 --features hazard-v1 --run-dir runs/bc-spell01-corrected-hazard
+```
+
+The 62 inputs contain player state, selected visible/collidable enemy offset,
+bullet density, and six geometric features for each of nine candidate actions:
+boundary validity, predicted bullet clearance, clearance relative to the best
+valid candidate, edge distance, horizontal aiming error, and proximity below
+the target. Predictions use the baseline's 12-frame linear-motion approximation
+and assumed 2 px/frame player speed. No action is masked or overridden and no
+teacher action ID is an input. The actor learns the decision using these
+handcrafted geometric inputs. This is a different representation experiment,
+not pure learning from flattened object records. Exact enemy body shapes,
+lasers, acceleration, and future spawns remain unmodeled.
+
+On the same four held-out episodes, this run selected epoch 30: validation
+accuracy 92.38%, movement accuracy 84.58%, and NLL 0.22649; training accuracy
+was 97.04%. Up accuracy was still only 25% (12 validation examples). Validation
+was used for model selection, not as an independent final test. The dataset and
+split differ from the first clone's 888-state validation; those older percentages
+must not be compared directly. Both corrected-data experiments share a split.
+
+The completed model is
+runs/bc-spell01-corrected-hazard/checkpoints/update-000000. Loading the archive
+restores the custom extractor automatically; retain agent/hazard_features.py.
+Use the original task's result menu for the next native check:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.train --evaluate --resume runs/bc-spell01-corrected-hazard/checkpoints/update-000000 --episodes 3 --run-dir runs/bc-spell01-corrected-hazard-eval
+```
+
+This checkpoint has not yet been evaluated in the native game. Do not start PPO
+fine-tuning until its autonomous behavior is checked. Geometry tests compare
+clearances and wall eligibility with the baseline, check bullet permutation and
+padding invariance, verify enemy filtering, and exercise checkpoint reload plus
+a real PPO update without a game.
+
+Checkpoint publication retries transient directory rename denials up to eight
 attempts with short backoff; permanent failure still leaves an unpublished
 pending directory. Existing checkpoint directories are never overwritten.

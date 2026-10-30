@@ -77,3 +77,8 @@ action mixing and records teacher labels on visited states. It sends game input,
 requires focus, and starts at a verified result menu. Mixed-run success is not
 autonomous student success. Clone its traces together with the original teacher
 demonstrations; see configs/IMITATION.md for exact commands.
+
+`clone.py --features hazard-v1` uses action-conditioned geometry features instead
+of flattened object records. The default remains flat for comparison. Store
+feature experiments in separate run directories and check held-out movement
+accuracy before native evaluation. Loaded checkpoints restore their own network.

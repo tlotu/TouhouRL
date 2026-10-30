@@ -55,3 +55,7 @@ It requires the optional training dependencies and sends no native input.
 `test_corrections.py` checks teacher/student execution probabilities, seeded
 mixing, annotation alignment through retries, teacher labels on failed learner
 episodes, aggregation, and invalid provenance/labels/tasks.
+
+`test_hazard_features.py` verifies predicted clearances, wall validity, padding
+and bullet permutation invariance, enemy selection, custom feature serialization,
+and an actual PPO optimizer update with the geometry extractor.
