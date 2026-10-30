@@ -27,3 +27,8 @@ requirements-training.txt; see configs/TRAINING.md before the first live run.
 training/validation sets. `cloning.py` fits the actor offline and selects weights
 by held-out cross-entropy. Source hashes, episode splits, and per-action metrics
 are stored with PPO-compatible checkpoints. See configs/IMITATION.md.
+
+`corrections.py` mixes a frozen student and teacher for corrective capture. It
+keeps executed actions distinct from supervised teacher labels and reports
+disagreement. Complete correction episodes can be aggregated with original
+teacher traces, including learner failures with valid teacher labels.

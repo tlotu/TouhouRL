@@ -73,5 +73,122 @@ The existing result-menu update boundaries and spell-v2 reward still apply.
 Continuation preserves cloning provenance in every checkpoint. Keep pure PPO,
 teacher performance, cloned evaluation, and PPO fine-tuning results separate.
 Initial tests cover synthetic demonstrations and a real supervised/PPO optimizer
-round trip. Native demonstration capture and cloned autonomous play remain
-unvalidated until user-run acceptance.
+round trip. Native acceptance results are recorded below; successful teacher
+capture does not establish that the cloned policy can clear the spell.
+
+## First native dataset and offline fit
+
+runs/demos/reactive-attack.jsonl contains ten verified successes and 4411
+transitions, with no incomplete episodes, dropped bullets, or radius fallbacks.
+All nine actions occur, but up has only 13 examples across the whole dataset.
+The episode split uses eight training episodes (3523 samples) and two validation
+episodes (888 samples). All teacher labels passed recomputation checks.
+
+The first offline fit in runs/bc-spell01/cloning.jsonl ran 30 epochs and selected
+epoch 29 by validation cross-entropy. Training accuracy was 93.05%; validation
+accuracy was 87.50%, compared with 66.67% for always staying still on validation
+states. Accuracy on validation samples requiring movement was 71.28%. Up-action
+accuracy remained zero (only five validation examples). These metrics measure
+imitation on teacher states and cannot establish autonomous avoidance.
+
+The completed checkpoint is runs/bc-spell01/checkpoints/update-000000, with zero
+PPO interaction steps and full dataset provenance.
+
+## First autonomous clone evaluation
+
+runs/bc-spell01-eval/training.jsonl completed three classified failures after
+383, 1156, and 739 logic frames (6.38, 19.27, and 12.32 seconds). Mean duration
+was 12.66 seconds. All retries worked, with no dropped bullets or radius
+fallbacks. The actor chose eight different actions across these episodes;
+pure up was never chosen. Stay accounted for 733 of 1140 decisions (64.30%).
+Sampled positions and user observations show lower-screen, mostly horizontal
+movement with some vertical adjustment. This differs from the pure-PPO
+checkpoint's repeated upward charge, but three failures do not establish
+reliable avoidance or a statistically supported improvement.
+
+Next, run a controlled 2048-step PPO continuation from this unchanged clone and
+evaluate the resulting checkpoint. Preserve the clone as the comparison model.
+The critic was not pretrained, and PPO samples actions while this evaluation
+used deterministic actions; training motion can therefore look different.
+If continuation degrades behavior or remains ineffective, inspect teacher-state
+disagreement and collect corrective teacher labels on learner-visited states
+before allocating another large training budget. That corrective collection
+workflow is described below.
+
+## First PPO fine-tuning run
+
+runs/bc-spell01-ppo/training.jsonl completed 2139 interaction steps, four
+updates, and eight failed episodes without logged errors. Mean duration was
+534.25 frames (8.90 seconds), with a maximum of 866 frames (14.43 seconds).
+This stochastic training sample is not directly comparable with the clone's
+deterministic evaluation. The first update logged approximate KL 0.05729;
+later values were 0.02828, 0.03304, and 0.01119. The final checkpoint is
+runs/bc-spell01-ppo/checkpoints/update-000004.
+
+An offline comparison on the same 888 held-out teacher states reloaded all five
+archives without native reset or input. Teacher-action accuracy declined from
+87.50% (clone) to 86.37%, 84.68%, 83.22%, and 81.08% after updates 1-4. Accuracy
+on movement labels declined from 71.28% to 65.54% at update 4; teacher NLL rose
+from 0.51745 to 0.72167. This demonstrates drift from the teacher on that fixed
+state set, not necessarily worse game performance. Preserve all checkpoints,
+evaluate update-000004, and do not increase the training budget until its
+autonomous behavior has been checked.
+
+runs/bc-spell01-ppo-eval/training.jsonl subsequently recorded three failures at
+414, 578, and 753 frames (mean 9.69 seconds), versus the clone's 12.66-second
+three-episode mean. This small sample does not establish statistical regression,
+but it provides no reason to expand the current PPO budget. Both evaluations
+completed all retries without dropped bullets or radius fallbacks. Return to
+the unchanged original clone for corrective collection.
+
+## Correct labels on learner-visited states
+
+The teacher-only dataset samples states reached by the teacher. Small clone
+errors can lead to different states. `collect_corrections.py` queries both the
+original clone and reactive_attack at each observed state, then samples which
+action to execute. This is a DAgger-style mixed rollout, not a safety guarantee.
+No online fitting occurs during capture. Teacher labels come from the baseline
+heuristic, not a verified optimal controller.
+
+Keep the original manual task unchanged and start from its result menu:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.collect_corrections --resume runs/bc-spell01/checkpoints/update-000000 --task spell01-character01-normal --teacher-probability 0.5 --episodes 10 --output runs/demos/corrections-01.jsonl
+```
+
+Each transition distinguishes `action` (executed), `student_action`,
+`teacher_action` (supervised label), and `executed_by`. Probability 0 executes
+only the student; probability 1 executes only the teacher. Neither setting
+changes which teacher label is recorded. The mixture seed is logged, but native
+game randomness is uncontrolled. Its summary reports disagreement and teacher
+execution counts; success under assistance is not autonomous clone success.
+
+The loader accepts both complete successes and complete failures from correction
+traces by default: labels are teacher suggestions even when the student fails.
+This exception does not change success-only filtering for teacher-only traces.
+Truncations and incomplete tails are still excluded. Validate shapes, labels,
+action provenance, and task/build/config consistency before fitting. Retain the
+original demonstrations and aggregate both sources:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.clone --demos runs/demos/reactive-attack.jsonl runs/demos/corrections-01.jsonl --epochs 30 --run-dir runs/bc-spell01-corrected
+```
+
+Use the actual printed filenames if a suffix was added. This fits a fresh actor
+on the combined dataset and preserves each source's collection type, student
+checkpoint path, teacher probability, and SHA-256 hash. Teacher behavior cloning
+remains distinct from PPO fine-tuning. Evaluate the new model autonomously before
+any further PPO work:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.train --evaluate --resume runs/bc-spell01-corrected/checkpoints/update-000000 --episodes 3 --run-dir runs/bc-spell01-corrected-eval
+```
+
+Tests cover probability extremes, seeded mixing, executed/label separation,
+trace alignment across retries, failed correction inclusion, source aggregation,
+and rejection of corrupt labels or mismatched tasks. Native correction capture
+and the corrected model's game performance have not yet been validated.
+
+Checkpoint publication retries transient directory rename denials up to five
+attempts with short backoff; permanent failure still leaves an unpublished
+pending directory. Existing checkpoint directories are never overwritten.

@@ -1,10 +1,25 @@
 """Publish complete checkpoint directories without overwriting models."""
 import json
 from pathlib import Path
+import time
 import uuid
 
 from env.session import OBSERVATION_SCHEMA
 from .training import REWARD_PROFILE
+
+
+def _publish_directory(pending, target):
+    # Windows can briefly deny directory renames after an archive is closed.
+    for attempt in range(5):
+        if target.exists():
+            raise FileExistsError(target)
+        try:
+            pending.rename(target)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.05 * (2 ** attempt))
 
 
 def create_run_directory(requested):
@@ -35,7 +50,7 @@ def save_checkpoint(learner, run_dir, state, config, build):
                 "config": config, **state}
     (pending / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     # An interrupted save leaves a pending directory, never a published model.
-    pending.rename(target)
+    _publish_directory(pending, target)
     pointer = root / f".latest-{uuid.uuid4().hex}.json"
     pointer.write_text(json.dumps({"checkpoint": target.name}), encoding="utf-8")
     pointer.replace(root / "latest.json")

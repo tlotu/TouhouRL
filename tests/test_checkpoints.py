@@ -2,11 +2,33 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from agent.checkpoints import create_run_directory, read_checkpoint, save_checkpoint
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_transient_rename_denial_is_retried_without_overwriting(self):
+        from agent.checkpoints import _publish_directory
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            pending, target = Path(directory) / "pending", Path(directory) / "published"
+            pending.mkdir()
+            (pending / "model.zip").write_bytes(b"complete")
+            original = Path.rename
+            attempts = []
+            def rename(path, destination):
+                attempts.append(path)
+                if len(attempts) < 3:
+                    raise PermissionError("temporarily busy")
+                return original(path, destination)
+            with patch.object(Path, "rename", autospec=True, side_effect=rename), patch("agent.checkpoints.time.sleep"):
+                _publish_directory(pending, target)
+            self.assertEqual(len(attempts), 3)
+            self.assertEqual((target / "model.zip").read_bytes(), b"complete")
+            pending.mkdir()
+            with self.assertRaises(FileExistsError):
+                _publish_directory(pending, target)
+
     def test_old_reward_checkpoint_is_evaluation_only(self):
         class Learner:
             def save(self, path):

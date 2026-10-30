@@ -35,6 +35,7 @@ def load_demonstrations(paths, include_failures=False):
     for path in map(Path, paths):
         digest = hashlib.sha256()
         header = pending = None
+        correction = False
         ended = False
         for line_number, raw in enumerate(_read_lines(path), 1):
             digest.update(raw)
@@ -45,7 +46,12 @@ def load_demonstrations(paths, include_failures=False):
                     if header is not None:
                         raise ValueError("Repeated trace header")
                     header = row
-                    if (row.get("schema") != OBSERVATION_SCHEMA or row.get("policy") != "reactive_attack"
+                    correction = row.get("collection") == "corrections"
+                    valid_policy = (row.get("policy") == "mixed_teacher_student"
+                                    and row.get("teacher") == "reactive_attack"
+                                    and 0 <= row.get("teacher_probability", -1) <= 1
+                                    and bool(row.get("student_checkpoint"))) if correction else row.get("policy") == "reactive_attack"
+                    if (row.get("schema") != OBSERVATION_SCHEMA or not valid_policy
                             or row.get("repeat") != 2 or row.get("trace") is not True
                             or row.get("run") is not True or not row.get("task")
                             or not row.get("build_md5") or not 1 <= row["capacity"] <= 640):
@@ -67,7 +73,16 @@ def load_demonstrations(paths, include_failures=False):
                         raise ValueError("Transition outside an active episode")
                     if row["step"] != len(pending["actions"]):
                         raise ValueError("Noncontiguous transition sequence")
-                    action = row["action"]
+                    executed = row["action"]
+                    action = row["teacher_action"] if correction else executed
+                    if type(executed) is not int or not 0 <= executed < 9:
+                        raise ValueError("Invalid executed action")
+                    if correction:
+                        student, source = row["student_action"], row["executed_by"]
+                        if (type(student) is not int or not 0 <= student < 9
+                                or source not in ("teacher", "student")
+                                or executed != (action if source == "teacher" else student)):
+                            raise ValueError("Invalid correction action provenance")
                     if type(action) is not int or not 0 <= action < 9:
                         raise ValueError("Invalid teacher action")
                     obs = validate_observation(row["observation"], identity["capacity"])
@@ -86,7 +101,7 @@ def load_demonstrations(paths, include_failures=False):
                         raise ValueError("Unverified episode boundary")
                     reason = row["reason"]
                     if pending["terminal"] and (reason == "spell_success" or
-                                                (include_failures and reason == "spell_failure")):
+                                                ((include_failures or correction) and reason == "spell_failure")):
                         pending["reason"] = reason
                         episodes.append(pending)
                     else:
@@ -97,7 +112,10 @@ def load_demonstrations(paths, include_failures=False):
         if header is None:
             raise ValueError(f"Missing trace header: {path}")
         discarded += int(pending is not None)
-        sources.append({"path": str(path.resolve()), "sha256": digest.hexdigest()})
+        sources.append({"path": str(path.resolve()), "sha256": digest.hexdigest(),
+                        "collection": "corrections" if correction else "teacher",
+                        "student_checkpoint": header.get("student_checkpoint"),
+                        "teacher_probability": header.get("teacher_probability")})
     if len({ep["id"] for ep in episodes}) != len(episodes):
         raise ValueError("Duplicate demonstration episodes")
     if len({s["sha256"] for s in sources}) != len(sources):

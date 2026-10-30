@@ -51,3 +51,7 @@ failure opt-in, duplicate data, invalid actions/shapes, and sequence integrity.
 `test_cloning.py` runs actual offline fitting on synthetic teacher data, checks
 validation improvement, reloads the published archive, and performs a PPO update.
 It requires the optional training dependencies and sends no native input.
+
+`test_corrections.py` checks teacher/student execution probabilities, seeded
+mixing, annotation alignment through retries, teacher labels on failed learner
+episodes, aggregation, and invalid provenance/labels/tasks.

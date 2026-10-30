@@ -71,3 +71,9 @@ use --policy reactive_attack --trace --capacity 128. Full transitions are saved
 without console output. `clone.py` fits a fresh actor offline from complete
 teacher episodes, writes held-out metrics, and publishes update-000000 for
 evaluation or PPO continuation. See configs/IMITATION.md for the workflow.
+
+`collect_corrections.py` runs a frozen checkpoint with seeded teacher/student
+action mixing and records teacher labels on visited states. It sends game input,
+requires focus, and starts at a verified result menu. Mixed-run success is not
+autonomous student success. Clone its traces together with the original teacher
+demonstrations; see configs/IMITATION.md for exact commands.
