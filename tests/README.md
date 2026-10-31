@@ -71,3 +71,9 @@ samples across lags, exclusion of terminal position jumps, and episode boundarie
 `test_input_probe.py` checks host-stage timing using an injected clock, separate
 student/teacher inference timing, frame-based probe phases, focus-loss cleanup,
 and budget truncation without another reset or success classification.
+Trace analysis also distinguishes a stationary reversal interval from delayed
+motion and refuses to join switch-response observations across missing steps.
+
+`test_action_commitment.py` checks raw/executed action provenance, holding across
+reversals and neutral actions, frame overshoot, episode reset isolation, hold=2
+control behavior, invalid annotations, and rejection as teacher demonstrations.

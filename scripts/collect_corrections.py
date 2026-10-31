@@ -8,7 +8,7 @@ from agent.corrections import CorrectionPolicy
 from env.action_emulator import ActionEmulator
 from env.session import GameSession, OBSERVATION_SCHEMA
 from env.windows import WindowsKeyboard, connect
-from scripts.diagnostics import DiagnosticLog, run_episodes
+from scripts.diagnostics import DiagnosticLog, run_episodes, timing_clock_info
 
 
 def main():
@@ -48,6 +48,7 @@ def main():
             learner = PPOBackend(TouhouEnv(session), checkpoint=str(Path(args.resume) / "model.zip"))
             choose = CorrectionPolicy(learner.deterministic_action, args.teacher_probability, args.seed)
             log.emit({"event": "connected", "pid": pid, "build_md5": build,
+                      "timing_clock": timing_clock_info(),
                       "schema": OBSERVATION_SCHEMA, "policy": "mixed_teacher_student",
                       "teacher": "reactive_attack", "collection": "corrections",
                       "run": True, "trace": True, "repeat": 2, "task": args.task,

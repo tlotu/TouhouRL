@@ -7,7 +7,7 @@ from .baselines import reactive_attack
 
 class CorrectionPolicy:
     def __init__(self, student, teacher_probability=0.5, seed=0, teacher=reactive_attack,
-                 clock=time.monotonic):
+                 clock=time.perf_counter):
         if not 0 <= teacher_probability <= 1:
             raise ValueError("teacher_probability must be in [0,1]")
         self.student, self.teacher = student, teacher

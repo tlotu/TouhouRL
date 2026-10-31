@@ -21,6 +21,43 @@ def position(obs):
     return [(obs["player"][i] + 1) * scale for i, scale in enumerate((192, 224))]
 
 
+def switch_responses(transitions):
+    """Describe observed response intervals, not exact engine consumption times."""
+    responses = []
+    for i in range(1, len(transitions)):
+        row, previous = transitions[i], transitions[i-1]
+        if row["step"] != previous["step"] + 1 or row["action"] == previous["action"]:
+            continue
+        action = row["action"]
+        first_displacement = None
+        preceding_frames = 0
+        response_frames = None
+        for j in range(i, len(transitions)):
+            current = transitions[j]
+            if (current["action"] != action or current["step"] != row["step"] + j-i
+                    or current["terminated"] or current["info"].get("dying")):
+                break
+            before, after = position(current["observation"]), position(current["next_observation"])
+            if not all(16 < p[0] < 368 and 24 < p[1] < 424 for p in (before, after)):
+                break
+            displacement = [b-a for a, b in zip(before, after)]
+            if first_displacement is None:
+                first_displacement = displacement
+            vx, vy = velocity(action)
+            responded = (math.hypot(*displacement) < 0.01 if action == 0 else
+                         displacement[0]*vx + displacement[1]*vy > 0.01)
+            if responded:
+                response_frames = preceding_frames
+                break
+            preceding_frames += current["info"]["delta_frames"]
+            if current["truncated"]:
+                break
+        responses.append({"step": row["step"], "previous_action": previous["action"],
+                          "action": action, "first_displacement": first_displacement,
+                          "preceding_frames_without_response": response_frames})
+    return responses
+
+
 def analyze(rows, tail=48):
     episodes = {}
     for row in rows:
@@ -64,7 +101,8 @@ def analyze(rows, tail=48):
             for key, value in values.items():
                 if key.endswith("_seconds") and isinstance(value, (int, float)) and math.isfinite(value):
                     timing_values.setdefault(key, []).append(value)
-        timing_summary = {key: {"samples": len(values), "median": statistics.median(values),
+        timing_summary = {key: {"samples": len(values), "zero_samples": values.count(0),
+                                "median": statistics.median(values),
                                 "max": max(values)} for key, values in timing_values.items()}
         detail = []
         for row in transitions[-tail:]:
@@ -79,11 +117,15 @@ def analyze(rows, tail=48):
         reports.append({"episode": episode, "transitions": len(transitions),
                         "disagreements": sum(r["action"] != r["teacher_action"] for r in transitions
                                              if "teacher_action" in r),
-                        "timing_summary": timing_summary, "motion_fits": fits, "tail": detail})
-    return {"episodes": reports, "interpretation":
+                        "timing_summary": timing_summary, "motion_fits": fits,
+                        "switch_responses": switch_responses(transitions), "tail": detail})
+    clock = next((r.get("timing_clock") for r in rows if r.get("event") == "connected"), None)
+    return {"episodes": reports, "timing_clock": clock, "interpretation":
             "Lag fits compare constant-speed hypotheses, not measured input latency. "
             "Snapshots, input polling and policy computation may affect displacement. "
-            "Teacher labels and predicted clearances do not prove counterfactual survival."}
+            "Teacher labels and predicted clearances do not prove counterfactual survival. "
+            "Zero durations can reflect clock resolution; missing clock metadata is unknown precision. "
+            "Switch response counts describe preceding sampled frames, not exact input latency."}
 
 
 def main():

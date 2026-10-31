@@ -58,3 +58,6 @@ decision computation between steps. Reset age begins when reset returns. Read
 completion is not the engine's capture timestamp, and SendInput return does not
 mean the game consumed the key. Terminal settling time is outside frame-wait
 timing. These fields measure host stages rather than exact engine input latency.
+Session/frame-stepper defaults use `time.perf_counter` for sub-frame measurements.
+The older `time.monotonic` implementation on this Windows Python has 15.625 ms
+resolution; zero values in historical logs must not be treated as zero cost.

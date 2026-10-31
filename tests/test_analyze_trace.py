@@ -1,7 +1,7 @@
 """Offline motion diagnosis must not mix episodes or count result-menu jumps."""
 import unittest
 
-from scripts.analyze_trace import analyze
+from scripts.analyze_trace import analyze, switch_responses
 
 
 def transition(episode, step, action, x, next_x, terminated=False):
@@ -46,3 +46,20 @@ class AnalyzeTraceTests(unittest.TestCase):
         self.assertEqual(report["timing_summary"]["input_send_seconds"]["samples"], 5)
         self.assertEqual(report["timing_summary"]["student_inference_seconds"]["median"], 0.003)
         self.assertNotIn("previous_action", report["timing_summary"])
+
+    def test_reversal_stall_and_release_are_distinguished_from_fixed_delay(self):
+        rows = [transition(0, 0, 3, 192, 194), transition(0, 1, 7, 194, 194),
+                transition(0, 2, 7, 194, 192), transition(0, 3, 0, 192, 192)]
+        for row in rows:
+            row["info"]["delta_frames"] = 1
+        responses = switch_responses(rows)
+        self.assertEqual(responses[0]["preceding_frames_without_response"], 1)
+        self.assertEqual(responses[0]["first_displacement"], [0, 0])
+        self.assertEqual(responses[1]["preceding_frames_without_response"], 0)
+        rows[2]["terminated"] = True
+        self.assertIsNone(switch_responses(rows)[0]["preceding_frames_without_response"])
+
+    def test_switch_response_does_not_cross_missing_steps(self):
+        rows = [transition(0, 0, 3, 192, 194), transition(0, 1, 7, 194, 194),
+                transition(0, 5, 7, 194, 192)]
+        self.assertIsNone(switch_responses(rows)[0]["preceding_frames_without_response"])

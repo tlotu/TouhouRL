@@ -103,3 +103,15 @@ not demonstration capture or an avoidance evaluation. Existing files are numbere
 Full diagnostic transitions include decision duration. Correction transitions
 also split student and teacher computation time; session timing appears in info.
 `analyze_trace.py` summarizes available timings while still accepting old traces.
+New correction/probe headers include high-resolution timing-clock metadata.
+The analyzer also reports direction-change response intervals and zero-duration
+counts. Missing clock metadata means precision is unknown; do not infer zero
+processing cost from historical zero timings or a fixed delay from a pooled fit.
+
+`evaluate_control.py --resume CHECKPOINT --task TASK --hold-frames 4 --episodes 1
+--output runs/control-hold4.jsonl` evaluates a network plus explicit action holding.
+Start at the same spell-result menu and keep focus. Observation repeat remains
+two frames and inference runs on every observation. Logs separate raw predictions
+from executed actions. This is a controller ablation, not plain network evaluation,
+PPO training, or teacher capture; cloning rejects its collection type. Hold=2 is
+the unmodified-cadence control. A hold can also delay an urgent escape or stop.

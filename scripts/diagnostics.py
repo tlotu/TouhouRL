@@ -6,6 +6,12 @@ import time
 from agent.baselines import make_policy
 
 
+def timing_clock_info():
+    info = time.get_clock_info("perf_counter")
+    return {"name": "perf_counter", "implementation": info.implementation,
+            "resolution_seconds": info.resolution, "monotonic": info.monotonic}
+
+
 class DiagnosticLog:
     def __init__(self, path=None):
         self.path = Path(path) if path else None
@@ -63,9 +69,9 @@ def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False, 
             action_counts = [0] * 9
             episode_return = 0.0
             while True:
-                decision_started = time.monotonic()
+                decision_started = time.perf_counter()
                 action = choose(obs)
-                decision_seconds = time.monotonic() - decision_started
+                decision_seconds = time.perf_counter() - decision_started
                 action_counts[action] += 1
                 next_obs, reward, terminated, truncated, info = session.step(action)
                 info = {**info, "decision_seconds": decision_seconds}

@@ -414,3 +414,181 @@ Host timings and frame-response traces cannot establish the exact engine input
 poll instant. Compare long holds with reversals and inspect skipped frames
 before selecting any delay-compensation model. No action mapping, hazard horizon,
 reward, or saved model was changed for this measurement.
+
+## First isolated input-response result
+
+runs/demos/input-response.jsonl completed 100 one-frame transitions, without
+bullets or deaths, and stopped at its time limit. Long holds move exactly
+2 px/frame horizontally in the requested direction. All eight left/right
+reversals have zero displacement on their first interval and 2 px displacement
+in the new direction on the following interval. Both releases stop within the
+first sampled interval. The actor is not running during this test. This does
+not support a universal one-decision action delay or an inverted mapping.
+It also cannot establish why reversals in the model-driven trace sometimes
+move opposite to the new request; policy/teacher/logging overhead differs.
+
+The common-sample motion-fit errors are 0.50, 0.75, and 3.00 px squared for
+zero-, one-, and two-decision hypotheses. Switch-specific observations matter
+more than choosing a fixed delay solely from this aggregate fit. See the saved
+report runs/demos/input-response-analysis.json.
+
+The first timing implementation used time.monotonic, which on this installed
+Python uses GetTickCount64 with 15.625 ms resolution. Many sub-frame durations
+were consequently recorded as zero. They cannot establish negligible compute
+or read cost. Session/frame-stepper, decision, and correction inference timings
+now use time.perf_counter (QueryPerformanceCounter on this host, reported
+resolution 0.1 microseconds). New capture headers include clock metadata. Fake
+clock injection remains supported, and no motion/controller setting changes.
+
+The isolated probe need not be repeated. Capture one model-driven episode with
+the corrected timings to compare observation age with the frame interval and
+separate inference, teacher, input-send, and read costs:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.collect_corrections --resume runs/bc-spell01-critical/checkpoints/update-000000 --task spell01-character01-normal --teacher-probability 0 --episodes 1 --output runs/demos/critical-timing.jsonl
+```
+
+This still executes only student actions. The teacher only labels states.
+Keep the checkpoint unchanged until native timing data supports a specific
+control or prediction adjustment; a constant one-step delay is not justified.
+
+## High-resolution model timing and control ablation
+
+runs/demos/critical-timing.jsonl reproduces the 379-frame failure and eight
+teacher disagreements with the unchanged actor. It contains 189 two-frame
+transitions and one terminal one-frame transition; there are no frame overshoots,
+dropped bullets, radius fallbacks, or teacher-executed actions. Median student
+inference is 1.494 ms, teacher inference 0.068 ms, decision time 1.619 ms, and
+snapshot-return-to-input-start age 1.960 ms (maximum 3.874 ms). Input-send median
+is 0.010 ms. These data do not support decision computation consuming a whole
+16.67 ms game frame. They do not rule out missing an input-poll boundary within
+that frame. During decisions 177-185, the opposing movement pattern persists.
+
+Median final-snapshot read time is 0.969 ms. Total polling-read time is 13.738 ms
+within a 31.323 ms median post-input wait. Those reads overlap the wait; do not
+add the read total as an independent extra delay. Observation age includes
+decision computation and logging; those also must not be double-counted.
+The saved offline report is runs/demos/critical-timing-analysis.json.
+
+Test one explicit action-duration ablation before changing the network or
+allocating further PPO interactions:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_control --resume runs/bc-spell01-critical/checkpoints/update-000000 --task spell01-character01-normal --hold-frames 4 --episodes 1 --output runs/control-hold4.jsonl
+```
+
+Start at the same spell-result menu. Inference and observation still run every
+two requested frames, but a newly selected network action is held for at least
+four elapsed frames before the next selection. Neutral actions are held too;
+urgent changes can be delayed. Raw predictions and executed actions are logged
+separately. There is no teacher, safety filter, training, or checkpoint write.
+This changes the deployed controller and must be reported as network plus action
+holding, even if it clears. The cloning loader rejects these traces. Hold=2
+provides a control with no imposed change at the original two-frame cadence.
+The fixed four-frame duration is an experiment, not a fitted latency estimate
+or evidence that input timing is the sole cause. Check closed-loop movement and
+failure before adopting any action-duration change; offline replay is insufficient.
+
+## First four-frame commitment native clear
+
+runs/control-hold4.jsonl records one verified spell_success after 952 logic
+frames (15.87 seconds), 476 transitions, and zero deaths. The settled result
+menu reports outcome_flag=1. No teacher ran; no model weights were updated.
+No dropped bullets or radius fallbacks were logged. The controller retained
+four-frame action commitment throughout this run, overriding 54 raw predictions
+(11.34% of decisions). This is the first recorded clear by the critical network
+plus explicit action holding, not a clear by the unmodified two-frame policy.
+
+In the common first 378 logic frames, the earlier critical-timing trace has
+23 executed action changes and nine direct left/right reversals. This run has
+14 changes and zero direct left/right reversals. Over its full, longer episode
+it has 83 executed changes and two direct left/right reversals, versus 101
+changes and eight direct reversals in its raw network proposals. These counts
+support reduced switching on the observed trajectory. Different visited states
+and the absence of teacher-label computation prevent treating the comparison as
+an isolated causal estimate. Holding can still delay urgent avoidance elsewhere.
+The offline report is runs/control-hold4-analysis.json.
+
+Keep the checkpoint and controller fixed and repeat five episodes before
+adopting it or attempting further PPO training:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_control --resume runs/bc-spell01-critical/checkpoints/update-000000 --task spell01-character01-normal --hold-frames 4 --episodes 5 --output runs/control-hold4-repeat.jsonl
+```
+
+Repeated identical spell trajectories check reproducibility, not generalization
+or independent success probability. A subsequent hold=2 run through this same
+entrypoint can control for the removal of teacher computation. Neither this
+single clear nor any follow-up controller-assisted clears justify loading these
+logs as teacher demonstrations or resuming the old PPO collector unchanged.
+
+## Five-episode commitment repeat
+
+runs/control-hold4-repeat.jsonl completed all five episodes: four successes and
+one classified failure, with no observed deaths or dying-state samples in any
+episode. There were no dropped bullets or radius fallbacks. Episodes 0, 1, 2,
+and 4 cleared at 1402, 984, 1071, and 1024 frames respectively (23.37, 16.40,
+17.85, and 17.07 seconds). The empirical clear fraction is 4/5 for this fixed
+task and network-plus-holding controller; it is not a general success estimate.
+
+Episode 3 failed at 1680 frames (28 seconds), with terminal deaths=0 and a
+settled failure result menu. The user observed a spell timeout. The last sampled
+visible/collidable Boss had 309 HP at frame 1558, and the median sampled absolute
+horizontal player/Boss separation during that episode was 149.67 px. These
+observations support insufficient attack alignment, but the reader does not
+provide a validated remaining spell timer or automatic timeout-cause label.
+The summary's legacy death_or_retry_episodes=1 must not be read as one death:
+that aggregate also counts a classified failure without death.
+
+Offline teacher queries on the failed controller trajectory show a discrepancy
+that holding alone does not address. In frames 902-1200 (150 decisions), the
+teacher recommends right in 96 states and down-right in 43; executed actions
+include left in 96 states, and raw network proposals include left in 92.
+At frame 1400's pre-action state, the player is at x=8 and the teacher selects
+right while both raw and committed actions select left. Holding did not invent
+that left prediction. This suggests a network limitation in edge/alignment
+states; teacher suggestions are heuristic labels, not counterfactual proof of
+recovery. Preserve the current checkpoint as the successful avoidance baseline.
+The offline report is runs/control-hold4-repeat-analysis.json.
+
+Before changing labels, network, rewards or training cadence, run the same
+evaluation entrypoint with hold=2 for three episodes, removing teacher-compute
+and entrypoint differences from the control-duration comparison:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_control --resume runs/bc-spell01-critical/checkpoints/update-000000 --task spell01-character01-normal --hold-frames 2 --episodes 3 --output runs/control-hold2-baseline.jsonl
+```
+
+Subsequent improvement work should target edge recovery and attack alignment on
+the visited states. Existing full traces can support offline teacher queries;
+raw control-evaluation logs remain excluded from cloning to preserve provenance.
+Do not increase the PPO budget or mix a held executed action with the raw
+two-frame action log probability in the unchanged PPO collector.
+
+## Two-frame same-entrypoint control
+
+runs/control-hold2-baseline.jsonl completed three failures at 379, 747, and
+379 logic frames (6.32, 12.45, 6.32 seconds), each with one observed death.
+All 754 decisions executed the raw network action: zero commitment overrides,
+no teacher computation, no dropped bullets or radius fallbacks. The first and
+third episodes repeat the known trajectory with nine direct left/right
+reversals each. The middle episode has eight such reversals and ends oscillating
+near x=187.21-189.21, y=416.04. Compared with the four-frame controller's four
+clears in five trials, this supports retaining four-frame holding as the current
+working baseline, without inferring a population success rate or sole cause.
+The offline report is runs/control-hold2-baseline-analysis.json.
+
+The user reports repeated downward volleys from the Boss: prioritizing exact
+horizontal alignment can place the player in the firing lane. Do not respond
+to the earlier no-death failure by unconditionally increasing alignment reward.
+On middle-episode decisions 361-369, offline reactive_attack queries match every
+network action, yet alternate right and left. Best predicted clearance drops
+from 24 to about 0.21 px while net motion remains small. Improving teacher-label
+agreement alone cannot address all such failures. Those actions often maximize
+the existing short-horizon clearance, so these observations do not isolate an
+excessive alignment preference as the sole cause either.
+
+Future work should consider safe firing positions, successive projectiles,
+movement continuity and teacher limitations. These are design directions, not
+implemented mechanisms. Preserve the successful held-controller checkpoint;
+no weights, rewards, or runtime controller settings changed for this analysis.

@@ -33,7 +33,7 @@ class GameSession:
     """Real-time diagnostic environment; network-update pausing is not implemented."""
 
     def __init__(self, reader, controls, repeat=2, capacity=64, max_frames=3600,
-                 spell_retry=False, clock=time.monotonic, sleep=time.sleep, quiet_limit=0):
+                 spell_retry=False, clock=time.perf_counter, sleep=time.sleep, quiet_limit=0):
         if not isinstance(capacity, int) or capacity <= 0:
             raise ValueError("capacity must be a positive integer")
         if not isinstance(max_frames, int) or max_frames <= 0:

@@ -45,3 +45,9 @@ disagreements, particularly near failed endings. Exact duplicate trajectories ar
 removed before that experiment's episode split. Reports retain unweighted metrics
 and add weighted loss and prioritized-sample accuracy. Checkpoint completion is
 committed through metadata.json after the archive closes, without directory moves.
+
+`action_commitment.py` is an explicit evaluation-only wrapper for control timing
+experiments. It infers every two-frame observation but holds each selected action
+for a minimum duration measured in actual elapsed frames. It logs raw predictions
+and executed actions separately, resets at episode boundaries, and has no teacher
+or collision override. It changes the deployed controller, not checkpoint weights.

@@ -8,7 +8,7 @@ class FrameTimeout(RuntimeError):
 
 class FrameStepper:
     def __init__(self, reader, controls, repeat=2, timeout=0.5,
-                 clock=time.monotonic, sleep=time.sleep):
+                 clock=time.perf_counter, sleep=time.sleep):
         if not isinstance(repeat, int) or not 1 <= repeat <= 16:
             raise ValueError("repeat must be an integer from 1 to 16")
         if not 0 < timeout <= 0.5:

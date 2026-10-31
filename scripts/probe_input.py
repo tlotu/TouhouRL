@@ -5,7 +5,7 @@ import sys
 from env.action_emulator import ActionEmulator
 from env.session import GameSession, OBSERVATION_SCHEMA
 from env.windows import WindowsKeyboard, connect
-from scripts.diagnostics import DiagnosticLog, run_episodes
+from scripts.diagnostics import DiagnosticLog, run_episodes, timing_clock_info
 
 
 # Long holds, releases and two-frame reversals; no model or teacher computation.
@@ -48,6 +48,7 @@ def main():
             raise
         with session:
             log.emit({"event": "connected", "pid": pid, "build_md5": build,
+                      "timing_clock": timing_clock_info(),
                       "schema": OBSERVATION_SCHEMA, "policy": "input_probe",
                       "collection": "input_probe", "repeat": 1, "capacity": 128,
                       "max_frames": PROBE_FRAMES, "phases": PHASES})
