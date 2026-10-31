@@ -82,3 +82,24 @@ demonstrations; see configs/IMITATION.md for exact commands.
 of flattened object records. The default remains flat for comparison. Store
 feature experiments in separate run directories and check held-out movement
 accuracy before native evaluation. Loaded checkpoints restore their own network.
+
+`clone.py --weighting correction-v1` deduplicates exact trajectories before the
+split and emphasizes disagreements, with higher bounded weight near failures.
+The default remains uniform. Validation selection uses weighted loss; logs also
+retain ordinary accuracy and loss. See configs/IMITATION.md for limitations.
+
+`analyze_trace.py TRACE --output NEW.json` inspects full transition logs offline,
+including teacher disagreements, candidate clearances, displacement, and motion
+fits for zero/one/two-decision delays. It sends no game input. Fits compare
+constant-speed hypotheses and cannot measure engine input latency directly.
+
+`probe_input.py --output runs/demos/input-response.jsonl` starts from a verified
+spell-result menu and runs a 100-frame horizontal hold/release/reversal schedule.
+It targets one-frame observations without a model or teacher; actual frame
+deltas can exceed one on a real-time process. Keys release at the time limit,
+but gameplay continues; return to the menu manually. This is input measurement,
+not demonstration capture or an avoidance evaluation. Existing files are numbered.
+
+Full diagnostic transitions include decision duration. Correction transitions
+also split student and teacher computation time; session timing appears in info.
+`analyze_trace.py` summarizes available timings while still accepting old traces.

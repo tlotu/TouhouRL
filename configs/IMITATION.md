@@ -240,12 +240,177 @@ Use the original task's result menu for the next native check:
 .\.venv\Scripts\python.exe -m scripts.train --evaluate --resume runs/bc-spell01-corrected-hazard/checkpoints/update-000000 --episodes 3 --run-dir runs/bc-spell01-corrected-hazard-eval
 ```
 
-This checkpoint has not yet been evaluated in the native game. Do not start PPO
-fine-tuning until its autonomous behavior is checked. Geometry tests compare
+The native evaluation in runs/bc-spell01-corrected-hazard-eval/training.jsonl
+failed all three episodes at 348, 477, and 348 frames (mean 6.52 seconds).
+Stay accounted for 487 of 587 actions (82.96%). All resets completed without
+dropped bullets or radius fallbacks. The first episode remained at (192,384)
+through the frame-300 periodic sample and failed at frame 348; its 18 movement
+actions are not fully resolved by periodic logging. The 92.38% validation
+accuracy did not translate to successful autonomous play. These three trials do
+not establish general performance, but they do not justify PPO fine-tuning.
+
+Before fitting another variant, capture complete student-only trajectories with
+teacher annotations. Existing periodic evaluation logs omit observations needed
+to locate the first disagreement and measure predicted clearance at that point.
+Probability zero guarantees student execution; the teacher only supplies labels:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.collect_corrections --resume runs/bc-spell01-corrected-hazard/checkpoints/update-000000 --task spell01-character01-normal --teacher-probability 0 --episodes 3 --output runs/demos/hazard-student-diagnostic.jsonl
+```
+
+Use these traces first for per-step disagreement and near-collision diagnosis,
+not automatic retraining or claims of improved performance. Check whether
+teacher disagreement is concentrated at necessary evasive decisions and whether
+the learner reaches states absent from the mixed demonstrations. These are
+hypotheses until the student-only observations are captured and inspected.
+
+Geometry tests compare
 clearances and wall eligibility with the baseline, check bullet permutation and
 padding invariance, verify enemy filtering, and exercise checkpoint reload plus
 a real PPO update without a game.
 
-Checkpoint publication retries transient directory rename denials up to eight
-attempts with short backoff; permanent failure still leaves an unpublished
-pending directory. Existing checkpoint directories are never overwritten.
+Checkpoint publication now reserves an exclusive target directory and writes
+metadata.json last as an atomic completion marker, after closing the archive.
+It no longer renames directories. Failed writes leave an incomplete directory;
+read_checkpoint rejects it and latest.json does not advance before completion.
+Existing checkpoint names are never overwritten. The earlier bounded directory
+rename retries proved insufficient in this Windows execution environment.
+
+## Student-only diagnosis and correction weighting
+
+runs/demos/hazard-student-diagnostic.jsonl recorded three identical failures at
+348 frames, with no teacher execution. Each episode had 174 decisions and only
+four teacher/student disagreements (97.70% agreement). At decision 156, the
+student continued down while the teacher chose down-left. At decisions 162,
+164, and 166, the student chose left while the teacher chose right. Intervening
+decisions selected right; the player alternated between x=191.41 and x=193.41
+at y=415.90. Predicted clearance for the chosen direction fell from about 21.37
+to 1.20 px over decisions 162-169. The 12-frame constant-action prediction is
+not a guarantee when the controller repeatedly reverses after two frames.
+Teacher suggestions on an already deviated trajectory are not proven recovery
+actions. Counterfactual teacher execution has not been measured here.
+
+The correction-v1 experiment removes exact duplicate observation/label
+trajectories before splitting, retaining the first copy. Each ordinary sample
+has weight 1, teacher/student disagreements have weight 3, and disagreements
+within the last 64 observed frames of a failed episode have weight 20. Weights
+are capped and affect both supervised fitting and validation-loss selection.
+Failure proximity is a heuristic priority signal, not a causal collision label.
+Uniform weighting remains the default for reproducibility.
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.clone --demos runs/demos/reactive-attack.jsonl runs/demos/corrections-01.jsonl runs/demos/hazard-student-diagnostic.jsonl --features hazard-v1 --weighting correction-v1 --epochs 30 --run-dir runs/bc-spell01-critical
+```
+
+Two duplicate student trajectories were removed. The remaining 21 episodes
+contain 8305 samples: 7265 training samples and 1040 validation samples. The
+diagnostic trajectory is in training. Epoch 25 was selected after 30 epochs;
+validation accuracy is 94.23% and prioritized-sample accuracy is 83.33% (288
+validation samples). This split differs from prior runs, so its accuracy is not
+a direct improvement estimate over their percentages.
+
+On replay of the recorded diagnostic training trajectory, disagreements dropped
+from four to two. Decisions 156, 164, and 166 now match the teacher; decision 162
+still differs, and a new disagreement appears at 155. This is an in-sample
+regression check, not a simulation of the new closed-loop trajectory or proof
+of recovery. It supports one new native check, not a PPO budget increase.
+
+The trained weights survived a directory-publication PermissionError. They were
+reloaded from the complete historical pending archive and republished using the
+completion-marker implementation. cloning.jsonl retains the original error,
+then records cloning_complete with recovered_from_pending and diagnostic_replay.
+The completed checkpoint is runs/bc-spell01-critical/checkpoints/update-000000.
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.train --evaluate --resume runs/bc-spell01-critical/checkpoints/update-000000 --episodes 3 --run-dir runs/bc-spell01-critical-eval
+```
+
+Tests cover trajectory
+deduplication, bounded tail weighting, actual weighted optimization, metadata
+commit failures, rejection of incomplete checkpoints, and publication without
+directory rename. Weights do not override actions during autonomous evaluation.
+
+## Critical-weighted model native evaluation
+
+runs/bc-spell01-critical-eval-001/training.jsonl recorded three failures, each
+after 379 logic frames (6.32 seconds), with identical action counts:
+[157, 0, 0, 9, 6, 2, 4, 10, 2]. Stay accounted for 82.63% of decisions. At
+elapsed frame 360, all three periodic samples show (192.59, 415.56), with a
+left action. No dropped bullets or radius fallbacks were logged. The user
+observed avoidance of the first downward bullet followed by collision with the
+second. The periodic log cannot identify the individual collision bullet or
+resolve the intervening action sequence. The prior model's 348-frame diagnostic
+is a different closed-loop trajectory and cannot substitute for this one.
+
+Do not expand PPO training. Capture one complete student-only episode from the
+unchanged critical model before another fit:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.collect_corrections --resume runs/bc-spell01-critical/checkpoints/update-000000 --task spell01-character01-normal --teacher-probability 0 --episodes 1 --output runs/demos/critical-student-diagnostic.jsonl
+```
+
+The teacher only annotates states. Compare the final action sequence and teacher
+labels, whether the actor returns to the bullet lane, and clearances for
+successive visible bullets. hazard-v1 pools only the minimum clearance per
+candidate over a 12-frame constant-motion prediction; it does not retain the
+identity or arrival times of successive bullets. This is a possible
+representation limitation, not an established cause of this failure.
+
+The subsequent runs/demos/critical-student-diagnostic.jsonl reproduces the
+379-frame failure, with 190 decisions, eight disagreements, no teacher execution,
+and no dropped bullets or radius fallbacks. Decisions 163-168 move left from
+roughly x=190.59 to x=171.76, then the actor returns toward the center. At
+decisions 178, 180, and 182 it selects right while the teacher selects left.
+During decisions 177-185, x alternates between 190.59 and 192.59 at y=415.56.
+These observations support repeated reversals rather than a missing second
+bullet observation; they do not identify the exact colliding bullet.
+
+A second issue is visible in measured motion: right decisions 178/180/182/184
+are followed by a 2 px left displacement, and the intervening left decisions
+by a 2 px right displacement. Predictions assume immediate 2 px/frame motion.
+An offline comparison on 36 common interior, nonterminal moving-context samples
+gives squared displacement errors of 11.44, 6.07, and 18.96 px squared for
+zero-, one-, and two-decision lag hypotheses. This suggests a control/observation
+delay, but does not isolate SendInput latency, input polling, snapshot timing,
+or time spent computing actions. Do not reverse the action mapping or claim
+an exact fixed delay from this trace. Sustained left motion is correctly left.
+
+The report is runs/demos/critical-student-analysis.json, generated with:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.analyze_trace runs/demos/critical-student-diagnostic.jsonl --output runs/demos/critical-student-analysis.json
+```
+
+The analyzer refuses to overwrite reports. Prioritize measurement of observation
+age, inference/input timing, and response to direction changes before another
+weighted clone fit. Neither an arbitrary longer prediction horizon nor stronger
+weights resolves the mismatch between predicted and observed switched motion.
+
+## Measure input response before changing the controller
+
+Start from the same spell's result menu, then focus the game:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.probe_input --output runs/demos/input-response.jsonl
+```
+
+The probe runs 100 requested logic frames (about 1.7 seconds at 60 FPS), with
+long horizontal holds, releases, and two-frame reversals. It targets one-frame
+sampling and records actual frame deltas. No student or teacher is evaluated.
+It stops and releases keys at the budget or on death/focus failure. The game
+continues after truncation; return to the menu manually. Do not count survival
+or truncation here as a model result, and do not use this trace for cloning.
+
+After inspecting this isolated response, capture the unchanged critical model
+again if needed with the existing student-only correction command. New captures
+include student/teacher inference durations, total decision duration, age of the
+previous returned snapshot when input starts, input-send duration, frame-wait
+duration and snapshot read timings. Existing archives remain compatible. The
+teacher is computed even at probability zero; its extra decision time is now
+visible. Observation age also includes encoding and logging, so it must not be
+added to decision duration as though they were independent stages.
+
+Host timings and frame-response traces cannot establish the exact engine input
+poll instant. Compare long holds with reversals and inspect skipped frames
+before selecting any delay-compensation model. No action mapping, hazard horizon,
+reward, or saved model was changed for this measurement.

@@ -54,10 +54,12 @@ class GameSession:
         self.started = False
         self.closed = False
         self.elapsed_frames = 0
+        self.timing = {}
+        self.previous_action = None
 
     def _info(self, reason=None, frames=0, seconds=0.0):
         s = self.sample
-        return {"reason": reason, "frame": s.frame, "scene": s.scene,
+        return {"timing": dict(self.timing), "reason": reason, "frame": s.frame, "scene": s.scene,
                 "lives": s.lives, "bombs": s.bombs, "deaths": s.deaths,
                 "dying": s.dying, "retry": s.retry,
                 "player_x": s.x if s.running else None,
@@ -86,6 +88,9 @@ class GameSession:
             if was_active:
                 raise RuntimeError("Finish the current episode before resetting")
             self.sample = self.resetter.reset(first=not self.started)
+            self.sample_received_at = self.clock()
+            self.previous_action = None
+            self.timing = {}
             self.started = self.active = True
             self.elapsed_frames = 0
             self.quiet_frames = 0
@@ -103,9 +108,19 @@ class GameSession:
             # The game keeps running between calls; long gaps invalidate the sample.
             if self.clock() - self.last_observation_time > 0.25:
                 raise FrameTimeout("Too much time passed since the last observation")
+            input_started = self.clock()
+            observation_age = input_started - self.sample_received_at
             self.controls.apply(action)
+            input_finished = self.clock()
             previous = self.sample
             self.sample, frames, seconds = self.stepper.advance(previous)
+            measured = dict(self.stepper.last_timing)
+            self.sample_received_at = measured.pop("sample_received_at")
+            self.timing = {**measured, "observation_age_seconds": observation_age,
+                           "input_send_seconds": input_finished - input_started,
+                           "post_input_wait_seconds": seconds,
+                           "previous_action": self.previous_action, "applied_action": int(action)}
+            self.previous_action = int(action)
             self.elapsed_frames += frames
             if self.sample.result_menu is not None and (
                     self.sample.result_menu.active or self.sample.retry

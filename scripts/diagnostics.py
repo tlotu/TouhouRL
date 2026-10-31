@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import sys
+import time
 from agent.baselines import make_policy
 
 
@@ -62,9 +63,12 @@ def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False, 
             action_counts = [0] * 9
             episode_return = 0.0
             while True:
+                decision_started = time.monotonic()
                 action = choose(obs)
+                decision_seconds = time.monotonic() - decision_started
                 action_counts[action] += 1
                 next_obs, reward, terminated, truncated, info = session.step(action)
+                info = {**info, "decision_seconds": decision_seconds}
                 transitions += 1
                 max_bullets = max(max_bullets, info.get("bullet_count", 0))
                 max_dropped = max(max_dropped, info.get("dropped_bullets", 0))

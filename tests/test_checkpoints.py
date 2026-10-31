@@ -8,38 +8,28 @@ from agent.checkpoints import create_run_directory, read_checkpoint, save_checkp
 
 
 class CheckpointTests(unittest.TestCase):
-    def test_permanent_rename_denial_stays_unpublished(self):
-        from agent.checkpoints import _publish_directory
+    def test_checkpoint_publication_does_not_rename_a_directory(self):
+        class Learner:
+            def save(self, path):
+                Path(path).write_bytes(b"complete")
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
-            pending, target = Path(directory) / "pending", Path(directory) / "published"
-            pending.mkdir()
-            with patch.object(Path, "rename", side_effect=PermissionError("denied")) as rename, patch("agent.checkpoints.time.sleep"):
-                with self.assertRaises(PermissionError):
-                    _publish_directory(pending, target)
-            self.assertEqual(rename.call_count, 8)
-            self.assertTrue(pending.exists())
-            self.assertFalse(target.exists())
+            with patch.object(Path, "rename", side_effect=PermissionError("directory rename denied")):
+                saved = save_checkpoint(Learner(), directory, {"updates": 0, "timesteps": 0}, {}, "build")
+            self.assertEqual(read_checkpoint(saved)["timesteps"], 0)
 
-    def test_transient_rename_denial_is_retried_without_overwriting(self):
-        from agent.checkpoints import _publish_directory
+    def test_failed_metadata_commit_does_not_advance_latest(self):
+        class Learner:
+            def save(self, path):
+                Path(path).write_bytes(b"complete")
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
-            pending, target = Path(directory) / "pending", Path(directory) / "published"
-            pending.mkdir()
-            (pending / "model.zip").write_bytes(b"complete")
-            original = Path.rename
-            attempts = []
-            def rename(path, destination):
-                attempts.append(path)
-                if len(attempts) < 3:
-                    raise PermissionError("temporarily busy")
-                return original(path, destination)
-            with patch.object(Path, "rename", autospec=True, side_effect=rename), patch("agent.checkpoints.time.sleep"):
-                _publish_directory(pending, target)
-            self.assertEqual(len(attempts), 3)
-            self.assertEqual((target / "model.zip").read_bytes(), b"complete")
-            pending.mkdir()
-            with self.assertRaises(FileExistsError):
-                _publish_directory(pending, target)
+            saved = save_checkpoint(Learner(), directory, {"updates": 0, "timesteps": 0}, {}, "build")
+            with patch.object(Path, "replace", side_effect=PermissionError("marker denied")):
+                with self.assertRaises(PermissionError):
+                    save_checkpoint(Learner(), directory, {"updates": 1, "timesteps": 2}, {}, "build")
+            target = saved.parent / "update-000001"
+            with self.assertRaises(OSError):
+                read_checkpoint(target)
+            self.assertEqual(json.loads((saved.parent / "latest.json").read_text())["checkpoint"], saved.name)
 
     def test_old_reward_checkpoint_is_evaluation_only(self):
         class Learner:
@@ -83,7 +73,9 @@ class CheckpointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
             with self.assertRaises(RuntimeError):
                 save_checkpoint(Broken(), directory, {"updates": 1}, {}, "test-build")
-            self.assertFalse((Path(directory) / "checkpoints" / "update-000001").exists())
+            target = Path(directory) / "checkpoints" / "update-000001"
+            self.assertFalse((target / "metadata.json").exists())
+            self.assertFalse((target.parent / "latest.json").exists())
 
     def test_partial_checkpoint_is_rejected(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
@@ -99,4 +91,6 @@ class CheckpointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
             with self.assertRaises(RuntimeError):
                 save_checkpoint(Silent(), directory, {"updates": 1, "timesteps": 2}, {}, "test")
-            self.assertFalse((Path(directory) / "checkpoints" / "update-000001").exists())
+            target = Path(directory) / "checkpoints" / "update-000001"
+            self.assertFalse((target / "metadata.json").exists())
+            self.assertFalse((target.parent / "latest.json").exists())

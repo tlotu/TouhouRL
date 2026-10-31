@@ -39,3 +39,9 @@ adds boundary and attack geometry. Bullet order does not affect the result.
 It uses the baseline's approximate motion model, with no action override or
 teacher action input. Enable with scripts.clone --features hazard-v1; checkpoint
 loading restores the extractor for evaluation and PPO continuation.
+
+Cloning optionally uses correction-v1 sample weights to emphasize teacher/student
+disagreements, particularly near failed endings. Exact duplicate trajectories are
+removed before that experiment's episode split. Reports retain unweighted metrics
+and add weighted loss and prioritized-sample accuracy. Checkpoint completion is
+committed through metadata.json after the archive closes, without directory moves.

@@ -16,14 +16,21 @@ class FrameStepper:
         self.reader, self.controls = reader, controls
         self.repeat, self.timeout = repeat, timeout
         self.clock, self.sleep = clock, sleep
+        self.last_timing = {}
 
     def advance(self, previous):
         started = self.clock()
         last = previous.frame
         elapsed = 0
+        reads = 0
+        read_seconds = 0.0
         while self.clock() - started < self.timeout:
             self.controls.check_focus()
+            read_started = self.clock()
             sample = self.reader.snapshot()
+            read_finished = self.clock()
+            reads += 1
+            read_seconds += read_finished - read_started
             if self.clock() - started >= self.timeout:
                 raise FrameTimeout("State acquisition exceeded the step deadline")
             delta = (sample.frame - last) & 255
@@ -32,6 +39,9 @@ class FrameStepper:
             elapsed += delta
             last = sample.frame
             if not sample.running or sample.deaths > previous.deaths or elapsed >= self.repeat:
+                self.last_timing = {"snapshot_calls": reads, "snapshot_seconds": read_seconds,
+                                    "sample_read_seconds": read_finished - read_started,
+                                    "sample_received_at": read_finished}
                 return sample, elapsed, self.clock() - started
             self.sleep(0.001)
         raise FrameTimeout("Game frames stalled; check pause state and focus")

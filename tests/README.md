@@ -59,3 +59,15 @@ episodes, aggregation, and invalid provenance/labels/tasks.
 `test_hazard_features.py` verifies predicted clearances, wall validity, padding
 and bullet permutation invariance, enemy selection, custom feature serialization,
 and an actual PPO optimizer update with the geometry extractor.
+
+Demonstration/cloning tests also cover exact trajectory deduplication, bounded
+correction weighting, and actual weighted optimization on conflicting labels.
+Checkpoint tests verify marker-last completion, failure isolation, and publication
+without directory renames.
+
+`test_analyze_trace.py` checks delayed-motion diagnosis, identical comparison
+samples across lags, exclusion of terminal position jumps, and episode boundaries.
+
+`test_input_probe.py` checks host-stage timing using an injected clock, separate
+student/teacher inference timing, frame-based probe phases, focus-loss cleanup,
+and budget truncation without another reset or success classification.

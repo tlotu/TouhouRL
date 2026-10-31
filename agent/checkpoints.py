@@ -1,25 +1,10 @@
 """Publish complete checkpoint directories without overwriting models."""
 import json
 from pathlib import Path
-import time
 import uuid
 
 from env.session import OBSERVATION_SCHEMA
 from .training import REWARD_PROFILE
-
-
-def _publish_directory(pending, target):
-    # Windows can briefly deny directory renames after an archive is closed.
-    for attempt in range(8):
-        if target.exists():
-            raise FileExistsError(target)
-        try:
-            pending.rename(target)
-            return
-        except PermissionError:
-            if attempt == 7:
-                raise
-            time.sleep(min(0.5, 0.05 * (2 ** attempt)))
 
 
 def create_run_directory(requested):
@@ -38,19 +23,18 @@ def save_checkpoint(learner, run_dir, state, config, build):
     root = Path(run_dir) / "checkpoints"
     root.mkdir(parents=True, exist_ok=True)
     target = root / f"update-{state['updates']:06d}"
-    if target.exists():
-        raise FileExistsError(target)
-    pending = root / f".pending-{uuid.uuid4().hex}"
-    pending.mkdir()
-    learner.save(pending / "model.zip")
-    if not (pending / "model.zip").is_file() or not (pending / "model.zip").stat().st_size:
+    # Reserve the name exclusively. Metadata is the completion marker, written
+    # only after the archive closes; publishing does not rename a directory.
+    target.mkdir(exist_ok=False)
+    learner.save(target / "model.zip")
+    if not (target / "model.zip").is_file() or not (target / "model.zip").stat().st_size:
         raise RuntimeError("Backend did not produce a nonempty model archive")
     metadata = {"format": 1, "complete": True, "schema": OBSERVATION_SCHEMA,
                 "reward_profile": REWARD_PROFILE, "build_md5": build,
                 "config": config, **state}
-    (pending / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-    # An interrupted save leaves a pending directory, never a published model.
-    _publish_directory(pending, target)
+    marker = target / f".metadata-{uuid.uuid4().hex}.json"
+    marker.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    marker.replace(target / "metadata.json")
     pointer = root / f".latest-{uuid.uuid4().hex}.json"
     pointer.write_text(json.dumps({"checkpoint": target.name}), encoding="utf-8")
     pointer.replace(root / "latest.json")

@@ -50,3 +50,11 @@ detection. Unexpected phases, invalid reads, and focus loss stop input.
 recognized result menu, releases owned keys, and checks foreground focus. The
 PPO loop calls it before and after optimization; it does not advance or reset
 the task. Model updates are never allowed inside an active episode.
+
+Step info includes `timing`: age since the prior snapshot returned when input
+starts, input-send duration, post-input frame-wait duration, snapshot read counts
+and durations, and previous/current requested actions. Age includes logging and
+decision computation between steps. Reset age begins when reset returns. Read
+completion is not the engine's capture timestamp, and SendInput return does not
+mean the game consumed the key. Terminal settling time is outside frame-wait
+timing. These fields measure host stages rather than exact engine input latency.

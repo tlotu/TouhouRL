@@ -57,8 +57,11 @@ a fresh run for spell-v2 rather than silently resuming with a different reward.
 
 Each run writes training.jsonl and checkpoints/update-NNNNNN. Update records
 include KL, clipping, entropy/value losses, sampling speed, update time, and the
-checkpoint path. Interrupted saves leave unpublished .pending directories;
-latest.json points to a completed checkpoint. Existing models are never replaced.
+checkpoint path. A new checkpoint name is reserved exclusively; its archive is
+written and closed before metadata.json is atomically committed as the completion
+marker. Interrupted saves can leave directories without that marker, which must
+not be loaded. latest.json advances only after completion. Existing models are
+never replaced. Historical saves may also leave .pending directories.
 Update 0 saves the initialized model before collecting the first batch.
 
 Resume restores policy, optimizer, cumulative timesteps, update number, and

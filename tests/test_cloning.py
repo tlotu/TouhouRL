@@ -11,6 +11,26 @@ from tests.test_ppo_backend import AVAILABLE
 
 @unittest.skipUnless(AVAILABLE, "Install requirements-training.txt")
 class CloningTests(unittest.TestCase):
+    def test_weighted_loss_prioritizes_rare_correction_and_validates_weights(self):
+        import gymnasium as gym
+        import numpy as np
+        from agent.cloning import fit_actor
+        from agent.ppo_backend import PPOBackend
+        class Offline(gym.Env):
+            observation_space = gym.spaces.Dict({"x": gym.spaces.Box(-1, 1, (2,), dtype=np.float32)})
+            action_space = gym.spaces.Discrete(9)
+        learner = PPOBackend(Offline(), rollout_steps=64)
+        data = ({"x": np.zeros((2, 2), dtype=np.float32)}, np.array([3, 7], dtype=np.int64))
+        weights = np.array([9., 1.], dtype=np.float32)
+        result = fit_actor(learner, data, data, lambda row: None, epochs=30,
+                           learning_rate=0.003, train_weights=weights, validation_weights=weights)
+        self.assertEqual(learner.deterministic_action({"x": [0., 0.]}), 3)
+        self.assertEqual(result["validation"]["priority_accuracy"], 1)
+        self.assertLess(result["validation"]["weighted_loss"], result["validation"]["loss"])
+        self.assertFalse(learner.model.policy.optimizer.state)
+        with self.assertRaises(ValueError):
+            fit_actor(learner, data, data, lambda row: None, train_weights=[-1., 1.])
+
     def test_offline_cli_fits_actor_and_publishes_resumable_checkpoint(self):
         from tests.test_demonstrations import trace_rows, write_trace
         from scripts.clone import main

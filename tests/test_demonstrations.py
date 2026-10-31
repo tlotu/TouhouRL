@@ -5,7 +5,8 @@ import tempfile
 import unittest
 
 from agent.baselines import reactive_attack
-from agent.demonstrations import load_demonstrations, split_episodes, stack_episodes
+from agent.demonstrations import (load_demonstrations, split_episodes, stack_episodes,
+                                  deduplicate_episodes, imitation_weights)
 from env.session import OBSERVATION_SCHEMA
 
 
@@ -32,6 +33,26 @@ def write_trace(path, rows):
 
 
 class DemonstrationTests(unittest.TestCase):
+    def test_exact_trajectories_are_deduplicated_before_splitting(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            path = Path(directory) / "trace.jsonl"
+            write_trace(path, trace_rows())
+            episodes, _ = load_demonstrations([path])
+            unique, removed = deduplicate_episodes(episodes)
+            self.assertEqual(len(unique), 1)
+            self.assertEqual(len(removed), 2)
+            # Identical episodes cannot become purported held-out evidence.
+            with self.assertRaises(ValueError):
+                split_episodes(unique)
+
+    def test_correction_weights_are_bounded_and_tail_specific(self):
+        episode = {"actions": [1, 2, 3], "frames": [10, 100, 130],
+                   "disagreements": [True, True, False], "reason": "spell_failure"}
+        self.assertEqual(imitation_weights([episode], "correction-v1").tolist(), [3, 20, 1])
+        self.assertEqual(imitation_weights([episode]).tolist(), [1, 1, 1])
+        episode["reason"] = "spell_success"
+        self.assertEqual(imitation_weights([episode], "correction-v1").tolist(), [3, 3, 1])
+
     def test_complete_episodes_split_without_frame_leakage(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
             path = Path(directory) / "trace.jsonl"

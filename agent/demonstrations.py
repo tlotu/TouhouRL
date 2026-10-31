@@ -66,7 +66,7 @@ def load_demonstrations(paths, include_failures=False):
                     if pending is not None:
                         discarded += 1
                     pending = {"id": f"{path.resolve()}:{row['episode']}", "episode": row["episode"],
-                               "observations": [], "actions": []}
+                               "observations": [], "actions": [], "disagreements": [], "frames": []}
                     ended = False
                 elif event == "transition":
                     if pending is None or ended or row["episode"] != pending["episode"]:
@@ -91,6 +91,8 @@ def load_demonstrations(paths, include_failures=False):
                         raise ValueError("Teacher action does not match its observation")
                     pending["observations"].append(obs)
                     pending["actions"].append(action)
+                    pending["disagreements"].append(bool(correction and row["student_action"] != action))
+                    pending["frames"].append(row["info"].get("elapsed_frames", 2 * (row["step"] + 1)))
                     ended = bool(row["terminated"] or row["truncated"])
                     pending["reason"] = row["info"]["reason"] if ended else None
                     pending["terminal"] = bool(row["terminated"] and not row["truncated"])
@@ -137,3 +139,36 @@ def stack_episodes(episodes):
     observations = [obs for episode in episodes for obs in episode["observations"]]
     return ({key: np.stack([obs[key] for obs in observations]) for key in observations[0]},
             np.asarray([action for episode in episodes for action in episode["actions"]], dtype=np.int64))
+
+
+def deduplicate_episodes(episodes):
+    """Keep exact observation/label trajectories in a single split group."""
+    kept, signatures, duplicates = [], {}, []
+    for episode in episodes:
+        digest = hashlib.sha256()
+        for obs, action in zip(episode["observations"], episode["actions"]):
+            for key in sorted(obs):
+                digest.update(obs[key].tobytes())
+            digest.update(bytes([action]))
+        signature = digest.hexdigest()
+        if signature in signatures:
+            duplicates.append({"kept": signatures[signature], "removed": episode["id"]})
+        else:
+            signatures[signature] = episode["id"]
+            kept.append(episode)
+    return kept, duplicates
+
+
+def imitation_weights(episodes, profile="uniform"):
+    """Bounded emphasis on disagreements, especially near failed endings."""
+    if profile not in ("uniform", "correction-v1"):
+        raise ValueError("Unknown imitation weighting")
+    weights = []
+    for episode in episodes:
+        end = episode["frames"][-1]
+        for disagreement, frame in zip(episode["disagreements"], episode["frames"]):
+            value = 1.0
+            if profile == "correction-v1" and disagreement:
+                value = 20.0 if episode["reason"] == "spell_failure" and end - frame <= 64 else 3.0
+            weights.append(value)
+    return np.asarray(weights, dtype=np.float32)
