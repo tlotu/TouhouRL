@@ -77,3 +77,7 @@ motion and refuses to join switch-response observations across missing steps.
 `test_action_commitment.py` checks raw/executed action provenance, holding across
 reversals and neutral actions, frame overshoot, episode reset isolation, hold=2
 control behavior, invalid annotations, and rejection as teacher demonstrations.
+
+`test_attack_zone.py` covers attack-band dead zones, safe second-best actions,
+both clearance gates, emergency fallback, walls, missing targets, parameter
+validation, targeted legacy equivalence and evaluation-data exclusion.

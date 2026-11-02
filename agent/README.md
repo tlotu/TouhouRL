@@ -51,3 +51,8 @@ experiments. It infers every two-frame observation but holds each selected actio
 for a minimum duration measured in actual elapsed frames. It logs raw predictions
 and executed actions separately, resets at episode boundaries, and has no teacher
 or collision override. It changes the deployed controller, not checkpoint weights.
+
+`attack_zone.py` provides an independent configurable attack-band rule experiment.
+It gates candidates by absolute clearance and loss from the best candidate before
+ranking attack-band excess. No model or HP feedback is used. See
+`configs/ATTACK_ZONE.md` for parameters and evidence limits.

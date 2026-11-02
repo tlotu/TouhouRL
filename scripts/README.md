@@ -115,3 +115,9 @@ two frames and inference runs on every observation. Logs separate raw prediction
 from executed actions. This is a controller ablation, not plain network evaluation,
 PPO training, or teacher capture; cloning rejects its collection type. Hold=2 is
 the unmodified-cadence control. A hold can also delay an urgent escape or stop.
+
+`evaluate_attack_zone.py` evaluates an independent rule with configurable attack
+half-width, absolute clearance and maximum clearance loss. Logs include complete
+raw rankings and held executed actions. See `configs/ATTACK_ZONE.md` for the
+width comparison. No model, training, HP feedback or automatic shot-width
+calibration is involved; cloning rejects this experiment's collection type.
