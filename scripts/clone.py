@@ -14,6 +14,8 @@ def main():
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--demos", nargs="+", help="Legacy teacher JSONL paths")
     source.add_argument("--zone-demos", nargs="+", help="Explicitly validate attack-zone traces and extract fresh decisions")
+    source.add_argument("--multitask-zone-demos", nargs="+",
+                        help="Combine original zone tasks with per-task episode splits")
     parser.add_argument("--run-dir", default="runs/behavior-cloning")
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=256)
@@ -26,18 +28,27 @@ def main():
     if (args.epochs < 1 or args.batch_size < 1 or not 0 < args.learning_rate <= 0.01
             or not 0 <= args.seed < 2**32):
         parser.error("Invalid epochs, batch size, learning rate, or seed")
-    args.features = args.features or ("hazard-zone-v1" if args.zone_demos else "flat")
-    if bool(args.zone_demos) != (args.features == "hazard-zone-v1"):
-        parser.error("hazard-zone-v1 requires --zone-demos and cannot mix legacy labels")
-    if args.zone_demos:
+    zone_paths = args.zone_demos or args.multitask_zone_demos
+    args.features = args.features or ("hazard-zone-v1" if zone_paths else "flat")
+    if bool(zone_paths) != (args.features == "hazard-zone-v1"):
+        parser.error("hazard-zone-v1 requires explicit zone data and cannot mix legacy labels")
+    if args.multitask_zone_demos:
+        from agent.zone_demonstrations import load_multitask_zone_demonstrations
+        episodes, provenance = load_multitask_zone_demonstrations(zone_paths, args.include_failures)
+    elif args.zone_demos:
         from agent.zone_demonstrations import load_zone_demonstrations
         episodes, provenance = load_zone_demonstrations(args.zone_demos, args.include_failures)
     else:
         episodes, provenance = load_demonstrations(args.demos, args.include_failures)
-    if args.weighting == "correction-v1" or args.zone_demos:
+    if args.weighting == "correction-v1" or zone_paths:
         episodes, duplicates = deduplicate_episodes(episodes)
         provenance["duplicate_trajectories"] = duplicates
-    train, validation = split_episodes(episodes, args.seed)
+    if args.multitask_zone_demos:
+        from agent.zone_demonstrations import split_zone_tasks
+        train, validation, task_splits = split_zone_tasks(episodes, provenance["identity"]["tasks"], args.seed)
+        provenance["task_splits"] = task_splits
+    else:
+        train, validation = split_episodes(episodes, args.seed)
     identity = provenance["identity"]
     from agent.cloning import fit_actor
     from agent.ppo_backend import PPOBackend
@@ -60,11 +71,11 @@ def main():
     validation_weights = imitation_weights(validation, args.weighting)
     run_dir = create_run_directory(args.run_dir)
     with DiagnosticLog(run_dir / "cloning.jsonl") as log:
-        feature_options = {"half_width": identity["attack_zone"]["half_width"]} if args.zone_demos else None
+        feature_options = {"half_width": identity["attack_zone"]["half_width"]} if zone_paths else None
         learner = PPOBackend(OfflineEnv(), seed=args.seed, features=args.features, feature_options=feature_options)
         config = {"rollout_steps": 512, "capacity": identity["capacity"],
                   "max_frames": identity["max_frames"], "seed": args.seed, "features": args.features}
-        if args.zone_demos:
+        if zone_paths:
             config.update(decision_contract=identity["decision_contract"], hold_frames=identity["hold_frames"],
                           feature_options=feature_options)
         provenance.update({"method": "behavior_cloning", "epochs": args.epochs, "features": args.features,

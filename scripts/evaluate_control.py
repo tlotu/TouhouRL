@@ -1,4 +1,4 @@
-"""Evaluate an unchanged network with an explicit minimum action duration."""
+"""Evaluate a frozen network with declared holding and optional boundary masks."""
 import argparse
 import hashlib
 from pathlib import Path
@@ -17,18 +17,24 @@ def evaluation_identity(saved, task, *, allow_task_transfer=False, transfer_reas
     if not task.strip():
         raise ValueError("Evaluation task label must be nonempty")
     original = saved.get("initialization", {}).get("identity", {}).get("task")
+    tasks = saved.get("initialization", {}).get("identity", {}).get("tasks")
+    if tasks is not None and (not isinstance(tasks, list) or len(tasks) < 2
+            or any(not isinstance(t, str) or not t.strip() for t in tasks)
+            or len(set(tasks)) != len(tasks) or original is not None):
+        raise ValueError("Invalid multi-task checkpoint identity")
+    tasks = tasks if tasks is not None else [original] if original else []
     reason = transfer_reason.strip() if transfer_reason else None
     if allow_task_transfer:
-        if not original or original == task:
+        if not tasks or task in tasks:
             raise ValueError("Task transfer requires a known, different source task")
         if not reason:
             raise ValueError("Task transfer requires --transfer-reason")
     elif reason is not None or transfer_reason is not None:
         raise ValueError("--transfer-reason requires --allow-task-transfer")
-    elif original and original != task:
+    elif tasks and task not in tasks:
         raise ValueError("Task label differs from the checkpoint's demonstrations; "
                          "use --allow-task-transfer and --transfer-reason for frozen evaluation")
-    return {"training_task": original, "evaluation_task": task,
+    return {"training_task": original, "training_tasks": tasks, "evaluation_task": task,
             "task_transfer": allow_task_transfer, "transfer_reason": reason,
             "task_verification": "manual"}
 
@@ -40,6 +46,8 @@ def main():
     parser.add_argument("--allow-task-transfer", action="store_true",
                         help="Allow a different manually selected spell for evaluation only")
     parser.add_argument("--transfer-reason", help="Describe the task change and comparison")
+    parser.add_argument("--boundary-mask", action="store_true",
+                        help="Explicitly exclude directions crossing bounds during the hold")
     parser.add_argument("--output", required=True)
     parser.add_argument("--hold-frames", type=int, default=4)
     parser.add_argument("--episodes", type=int, default=1)
@@ -76,22 +84,40 @@ def main():
             raise
         with session:
             learner = PPOBackend(TouhouEnv(session), checkpoint=str(source))
-            choose = ActionCommitment(learner.deterministic_action,
-                                      lambda: session.elapsed_frames, args.hold_frames)
+            boundary = {}
+            policy_name = "ppo_action_commitment"
+            collection = "control_evaluation"
+            if args.boundary_mask:
+                from agent.boundary_control import BoundaryCommitment, BOUNDARY_CONTRACT, FIELD_BOUNDS
+                choose = BoundaryCommitment(learner.action_logits, lambda: session.elapsed_frames,
+                                            args.hold_frames)
+                policy_name = "ppo_boundary_mask_action_commitment"
+                collection = "boundary_control_evaluation"
+                boundary = {"boundary_contract": BOUNDARY_CONTRACT,
+                            "boundary_bounds": FIELD_BOUNDS, "boundary_speed": 2.,
+                            "boundary_horizon_frames": args.hold_frames,
+                            "boundary_hold_interruptions_allowed": True}
+            else:
+                choose = ActionCommitment(learner.deterministic_action,
+                                          lambda: session.elapsed_frames, args.hold_frames)
             log.emit({"event": "connected", "pid": pid, "build_md5": build,
                       "schema": OBSERVATION_SCHEMA, "timing_clock": timing_clock_info(),
-                      "policy": "ppo_action_commitment", "collection": "control_evaluation",
+                      "policy": policy_name, "collection": collection,
                       "run": True, "trace": True, "repeat": 2, "task": args.task,
                       "capacity": config["capacity"], "max_frames": config["max_frames"],
                       "hold_frames": args.hold_frames,
                       "decision_contract": config.get("decision_contract"),
                       "feature_options": config.get("feature_options"),
                       "student_checkpoint": str(Path(args.resume).resolve()),
-                      "student_model_sha256": source_hash, **identity})
-            print(f"Training task: {identity['training_task']}; evaluation task: {args.task}. "
+                      "student_model_sha256": source_hash, **identity, **boundary})
+            print(f"Training task: {identity['training_task'] or identity['training_tasks']}; evaluation task: {args.task}. "
                   "Task selection is manual; labels are not read from the game.", file=sys.stderr)
             if identity["task_transfer"]:
                 print(f"Frozen task transfer: {identity['transfer_reason']}", file=sys.stderr)
+            if args.boundary_mask:
+                print("Boundary-mask experiment: actor scores are filtered for hold endpoints; "
+                      "a projected crossing can interrupt a hold. No bullet or teacher override.",
+                      file=sys.stderr)
             print("Start from the declared evaluation spell RESULT menu and keep game focus. "
                   "This evaluates a network plus action holding, without training or a teacher.",
                   file=sys.stderr)
@@ -102,7 +128,7 @@ def main():
                 log.emit(choose.annotate(row), console=row["event"] != "transition")
             try:
                 run_episodes(session, args.episodes, emit, trace=True,
-                             policy="ppo_action_commitment", action_fn=choose)
+                             policy=policy_name, action_fn=choose)
             finally:
                 log.emit(choose.summary())
 

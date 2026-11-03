@@ -94,6 +94,16 @@ Shift transitions and menu exclusion, without native input or process access.
 observation continuity, slow telemetry, incomplete/duplicate/mixed-source handling,
 legacy PPO rejection, actual supervised optimization and width-preserving reload.
 
+`test_multitask_zone.py` checks original task provenance, strict validation of
+each source, compatible control settings, deduplication before per-task splits,
+seen/unseen evaluation rules, actual joint cloning publication and rejection by
+the single-task held-PPO entry.
+
+`test_boundary_control.py` checks all field edges/corners, tangential actions,
+execution-horizon masks, raw/masked/held provenance, safe hold continuation,
+overshoot interruption, reset boundaries, interior equivalence, invalid inputs
+and a separate fake CLI run preserving source archives and excluding teacher use.
+
 Diagnostic logging tests also verify full-file evidence under compact console
 output, stdout/stderr transcript capture, final numbered paths after errors,
 stream restoration, transcript collision handling and hidden trace events.

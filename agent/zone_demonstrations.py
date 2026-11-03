@@ -7,7 +7,7 @@ import numpy as np
 
 from .action_commitment import ActionCommitment
 from .attack_zone import AttackZoneConfig, rank_attack_zone
-from .demonstrations import validate_observation
+from .demonstrations import validate_observation, split_episodes
 from env.session import OBSERVATION_SCHEMA
 from env.movement_probe import BASELINE_BUILD
 
@@ -125,3 +125,50 @@ def load_zone_demonstrations(paths, include_failures=False):
     return episodes, {"identity": identity, "sources": sources, "incomplete_episodes": discarded,
                       "excluded_episodes": excluded, "include_failures": include_failures,
                       "label_contract": "fresh decisions only; held intermediate frames excluded"}
+
+
+def load_multitask_zone_demonstrations(paths, include_failures=False):
+    """Validate each original task before combining compatible held-zone data."""
+    episodes, sources, tasks = [], [], set()
+    shared = None
+    incomplete = excluded = 0
+    for path in paths:
+        current, provenance = load_zone_demonstrations([path], include_failures)
+        identity = dict(provenance["identity"])
+        task = identity.pop("task")
+        if shared is not None and identity != shared:
+            raise ValueError("Multi-task zone teacher, build or control settings differ")
+        shared = identity
+        tasks.add(task)
+        episodes.extend({**ep, "task": task} for ep in current)
+        sources.extend({**source, "task": task} for source in provenance["sources"])
+        incomplete += provenance["incomplete_episodes"]
+        excluded += provenance["excluded_episodes"]
+    if len(tasks) < 2:
+        raise ValueError("Multi-task cloning requires at least two declared tasks")
+    if len({s["sha256"] for s in sources}) != len(sources):
+        raise ValueError("Duplicate multi-task demonstration files")
+    return episodes, {"identity": {**shared, "tasks": sorted(tasks)}, "sources": sources,
+                      "dataset_contract": "attack-zone-multitask-v1",
+                      "incomplete_episodes": incomplete, "excluded_episodes": excluded,
+                      "include_failures": include_failures,
+                      "label_contract": "fresh decisions only; original task per episode and source"}
+
+
+def split_zone_tasks(episodes, tasks, seed=0):
+    """Hold out complete episodes within every declared task."""
+    groups = {task: [] for task in tasks}
+    for episode in episodes:
+        groups[episode["task"]].append(episode)
+    train, validation, manifest = [], [], {}
+    for task in sorted(groups):
+        if len(groups[task]) < 2:
+            raise ValueError(f"Task {task!r} needs two unique eligible episodes after deduplication")
+        task_train, task_validation = split_episodes(groups[task], seed)
+        train.extend(task_train)
+        validation.extend(task_validation)
+        manifest[task] = {"train_episode_ids": [ep["id"] for ep in task_train],
+                          "validation_episode_ids": [ep["id"] for ep in task_validation],
+                          "train_samples": sum(len(ep["actions"]) for ep in task_train),
+                          "validation_samples": sum(len(ep["actions"]) for ep in task_validation)}
+    return train, validation, manifest

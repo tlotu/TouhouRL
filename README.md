@@ -328,6 +328,12 @@ For teacher demonstration collection and offline behavior cloning before PPO,
 see [configs/IMITATION.md](configs/IMITATION.md). This path uses reactive_attack
 as a teacher and evaluates the cloned actor before fine-tuning.
 
+For validated four-frame attack-zone cloning, including explicit multi-task
+sources and per-task episode splits, see [configs/ZONE_CLONING.md](configs/ZONE_CLONING.md).
+Held PPO continuation is documented in [configs/HELD_PPO.md](configs/HELD_PPO.md).
+For the separate frozen-actor boundary-mask experiment, see
+[configs/BOUNDARY_CONTROL.md](configs/BOUNDARY_CONTROL.md).
+
 Install optional training dependencies, then run the offline tests first:
 
 ```powershell

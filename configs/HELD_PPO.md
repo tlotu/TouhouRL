@@ -177,7 +177,7 @@ over the clone or reliable generalization. Stop growing the same-task budget.
 The next comparison uses the user's stage-6 spell with faster, denser, straight
 round bullets. Keep character/equipment/difficulty fixed and both networks frozen.
 This preserves a similar bullet family, but does not isolate speed or density
-from all other spell differences. No new-spell results are available yet.
+from all other spell differences. The first frozen results are recorded below.
 
 ## Frozen cross-spell comparison
 
@@ -223,3 +223,80 @@ Before any new demonstrations or adaptation, save both frozen results. If both
 fail, examine coverage, control timing and the teacher separately; keep the old
 spell available for later forgetting checks. The transfer flag only applies to
 evaluation, never to training or checkpoint relabeling.
+
+## First stage-6 frozen results
+
+Both runs completed two successes and one native failure. The clone failed at
+329 frames with one death, then succeeded at 704/699 frames. PPO update 4 failed
+at 1080 frames with zero deaths, then succeeded at 735/711 frames. The user
+observed a timeout in the PPO failure; the final collidable boss sample had
+217 HP. This is a native failure, not the Python 3600-frame limit. These small,
+unpaired trials establish some transfer but no ranking between the two models.
+
+The clone made a fresh rightward choice shortly before collision despite a
+safer leftward forecast. PPO spent 632 active frames at x>=320, with 23 direct
+left/right reversals. At 83 fresh right-side decisions the existing teacher's
+clearance gate allowed a leftward action; PPO selected one at 48 of these.
+Those offline forecasts are local and cannot prove an alternative trajectory
+would have succeeded. Diagnostic HP decreased in the right-side phase but much
+more slowly, so nonzero damage alone would not be a sufficient alignment signal.
+
+Maximum bullet counts were 242/239, dropping 114/111 from observations at peak.
+All four successful episodes also exceeded capacity. No radius fallbacks or
+frame deltas above 2 were logged; current model hashes match the frozen inputs.
+See runs/stage06-frozen-comparison-analysis.json for source hashes, episode
+metrics and teacher forecast examples. Full omitted-bullet counterfactuals
+cannot be reconstructed from these traces.
+
+Before adaptation, evaluate the unchanged rule teacher on the same stage-6
+spell, character, equipment and difficulty. Start from its result menu:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_attack_zone --half-width 24 --hold-frames 4 --episodes 3 --movement-probe --task stage06-straight-dense-character01-normal --output runs/stage06-zone24-teacher-check.jsonl
+```
+
+Keep capacity and other settings fixed. This is a diagnostic teacher run, not
+an automatic cloning/training step. If the teacher succeeds, inspect new-task
+state coverage and corrective labels. If it also gets trapped or collides,
+inspect its local forecast and ranking before treating its labels as targets.
+The first teacher run is recorded below; adaptation remains pending.
+
+## Stage-6 teacher check
+
+runs/stage06-zone24-teacher-check.jsonl completed three successes at
+735/760/695 frames with zero deaths, mean 12.17 seconds to result. Direct
+left/right reversals were 0/1/0; active x remained within 124.69-251.07 across
+the runs. All 1093 playable telemetry samples passed the existing slow-mode
+consistency checks; 126 steady interior motion samples were 2 px/frame.
+Peak bullet count was 240, with 112 omitted from observations. No radius
+fallbacks or frame intervals above 2 were recorded. Three wins are preliminary,
+not a guarantee of long-run teacher reliability or a paired policy ranking.
+
+The strict zone loader accepted all three complete, unique episodes and retained
+548 fresh decision labels (184/190/174), including 178 movement labels. Both
+frozen models produced exactly the same argmax actions on these observations:
+473/548 teacher agreement (86.31%), or 123/178 (69.10%) when the teacher moved.
+This is an offline diagnostic, not closed-loop evaluation or a held-out score
+for a newly selected model. It shows no deterministic action change from the
+old-task PPO update on this particular new-task sample. See
+runs/stage06-zone24-teacher-check-analysis.json for source hashes and details.
+
+Collect seven more episodes with unchanged settings to reach ten total:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_attack_zone --half-width 24 --hold-frames 4 --episodes 7 --movement-probe --task stage06-straight-dense-character01-normal --output runs/demos/stage06-zone24-teacher.jsonl
+```
+
+Keep the initial three-episode file as part of the prospective dataset. Validate
+and deduplicate the two files before fitting. The current loader can combine
+them because their tasks/settings match; it deliberately rejects a direct mix
+with the old stage-1 task. Explicit multiple-task provenance and per-task whole
+episode splits are needed before joint training. Do not relabel raw logs or
+replace the frozen reference models. This teacher trace contains no x>=320
+states, so later student-state corrections may still be needed for edge escape;
+ordinary successful demonstrations do not establish that coverage. The seven
+additional episodes have now completed successfully. Explicit joint cloning is
+implemented in ZONE_CLONING.md, with a separate candidate model. Its stage-6
+evaluation is now an adapted, seen-task test. Native joint-model evaluations
+remain pending; the single-task held-PPO entry still rejects this multi-task
+checkpoint.

@@ -92,6 +92,14 @@ class PPOBackend:
         action, _ = self.model.predict(obs, deterministic=True)
         return int(np.asarray(action).item())
 
+    def action_logits(self, obs):
+        """Expose frozen actor scores for explicit evaluation controllers."""
+        self.model.policy.set_training_mode(False)
+        tensor, _ = self.model.policy.obs_to_tensor(obs)
+        with torch.no_grad():
+            scores = self.model.policy.get_distribution(tensor).distribution.logits[0]
+        return scores.cpu().tolist()
+
     def save(self, path):
         # SB3 includes policy and optimizer state; native game state is excluded.
         self.model.save(path)
