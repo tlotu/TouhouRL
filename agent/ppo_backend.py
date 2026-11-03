@@ -97,7 +97,10 @@ class PPOBackend:
         self.model.policy.set_training_mode(False)
         tensor, _ = self.model.policy.obs_to_tensor(obs)
         with torch.no_grad():
-            scores = self.model.policy.get_distribution(tensor).distribution.logits[0]
+            if hasattr(self.model.policy, "unmasked_logits"):
+                scores = self.model.policy.unmasked_logits(tensor)[0]
+            else:
+                scores = self.model.policy.get_distribution(tensor).distribution.logits[0]
         return scores.cpu().tolist()
 
     def save(self, path):

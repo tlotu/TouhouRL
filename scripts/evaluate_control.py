@@ -10,6 +10,7 @@ from env.action_emulator import ActionEmulator
 from env.session import GameSession, OBSERVATION_SCHEMA
 from env.windows import WindowsKeyboard, connect
 from env.frame_stepper import ACQUISITION_CONTRACT
+from agent.masked_contract import MASKED_PPO_CONTRACT
 from scripts.diagnostics import DiagnosticLog, run_episodes, timing_clock_info
 
 
@@ -68,6 +69,8 @@ def main():
     from env.touhou_env import TouhouEnv
 
     config = saved["config"]
+    if config.get("ppo_contract") == MASKED_PPO_CONTRACT and not args.boundary_mask:
+        parser.error("Masked PPO checkpoints require --boundary-mask evaluation")
     if config.get("decision_contract") == "attack-zone-held-v1" and args.hold_frames != config["hold_frames"]:
         parser.error("Zone-clone evaluation must keep the checkpoint hold_frames setting")
     source = Path(args.resume) / "model.zip"
@@ -85,6 +88,9 @@ def main():
             raise
         with session:
             learner = PPOBackend(TouhouEnv(session), checkpoint=str(source))
+            if config.get("ppo_contract") == MASKED_PPO_CONTRACT and getattr(
+                    learner.model.policy, "mask_hold_frames", None) != args.hold_frames:
+                raise RuntimeError("Masked checkpoint policy and hold metadata differ")
             boundary = {}
             policy_name = "ppo_action_commitment"
             collection = "control_evaluation"

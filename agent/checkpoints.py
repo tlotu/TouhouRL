@@ -6,6 +6,7 @@ import uuid
 from env.session import OBSERVATION_SCHEMA
 from .training import REWARD_PROFILE
 from .held_training import HELD_REWARD_PROFILE, PPO_CONTRACT
+from .masked_contract import MASKED_PPO_CONTRACT, MASKED_REWARD_PROFILE
 
 
 def create_run_directory(requested):
@@ -46,6 +47,9 @@ def read_checkpoint(path, *, evaluation=False):
     path = Path(path)
     metadata = json.loads((path / "metadata.json").read_text(encoding="utf-8"))
     allowed_rewards = ("spell-v1", REWARD_PROFILE) if evaluation else (REWARD_PROFILE,)
+    if (metadata.get("config", {}).get("ppo_contract") == MASKED_PPO_CONTRACT
+            and metadata["config"].get("decision_contract") == "attack-zone-held-v1"):
+        allowed_rewards = (*allowed_rewards, MASKED_REWARD_PROFILE)
     if (metadata.get("config", {}).get("ppo_contract") == PPO_CONTRACT
             and metadata["config"].get("decision_contract") == "attack-zone-held-v1"):
         allowed_rewards = (*allowed_rewards, HELD_REWARD_PROFILE)

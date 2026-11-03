@@ -47,7 +47,8 @@ def duration_gae(rows, gamma_frame, lambda_frame):
 
 
 def collect_held_episodes(env, learner, minimum_steps, emit, hold_frames=4,
-                          gamma_frame=DEFAULT_GAMMA_FRAME):
+                          gamma_frame=DEFAULT_GAMMA_FRAME, reward_fn=frame_reward,
+                          action_feasible=None):
     if (minimum_steps < 2 or type(hold_frames) is not int or not 2 <= hold_frames <= 16
             or hold_frames % 2 or not 0 < gamma_frame <= 1):
         raise TrainingError("Invalid held collection budget")
@@ -66,12 +67,17 @@ def collect_held_episodes(env, learner, minimum_steps, emit, hold_frames=4,
                 raise TrainingError("Invalid sampled held decision")
             duration = 0
             reward = 0.
+            if action_feasible is not None and not action_feasible(obs, decision.action, hold_frames):
+                raise TrainingError("Sampled action violates its execution mask")
             while duration < hold_frames:
+                if duration and action_feasible is not None and not action_feasible(
+                        obs, decision.action, max(2, hold_frames-duration)):
+                    break
                 obs, diagnostic_reward, terminated, truncated, info = env.step(decision.action)
                 if truncated or (terminated and info["reason"] not in ("spell_success", "spell_failure")):
                     raise TrainingError("Held collection requires recognized complete episodes")
                 frames = info["delta_frames"]
-                reward += gamma_frame**duration * frame_reward(info, gamma_frame)
+                reward += gamma_frame**duration * reward_fn(info, gamma_frame)
                 duration += frames
                 env_return += diagnostic_reward
                 total_substeps += 1
@@ -87,7 +93,8 @@ def collect_held_episodes(env, learner, minimum_steps, emit, hold_frames=4,
             episode_reward += reward
             emit({"event": "held_decision", "episode": episodes, "decision": episode_decisions,
                   "action": decision.action, "log_prob": decision.log_prob, "value": decision.value,
-                  "reward": reward, "duration_frames": duration, "terminated": terminated})
+                  "reward": reward, "duration_frames": duration, "terminated": terminated,
+                  "hold_interrupted": duration < hold_frames and not terminated})
             if terminated:
                 episodes += 1
                 successes += int(info["reason"] == "spell_success")

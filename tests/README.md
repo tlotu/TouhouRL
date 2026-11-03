@@ -116,3 +116,10 @@ stream restoration, transcript collision handling and hidden trace events.
 holds, early endings/overshoot, frame rewards and GAE, aborted batches, menu
 boundaries, additional budgets, settings validation, actual gradients and
 optimizer resume, plus CLI publication preserving the source archive.
+
+`test_masked_ppo.py` checks scalar/tensor masks, conditional probabilities,
+sampling/update likelihood consistency, actual actor gradients, exact optimizer
+tensor restoration and a second update, rejection of unmasked likelihoods,
+remaining-hold interruption, reward distinctions, offline conversion, task and
+evaluation guards, and fake-native training publication without changing source
+archives. The full suite passes 234 tests with training dependencies installed.

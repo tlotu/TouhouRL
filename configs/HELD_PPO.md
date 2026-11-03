@@ -1,5 +1,8 @@
 # Held-decision PPO continuation
 
+This is the original unmasked, single-task path. The joint clone now has a
+separate mask-consistent entry documented in [MASKED_PPO.md](MASKED_PPO.md).
+
 Use scripts.train_held for attack-zone-held-v1 clones or its own held-smdp-v1
 checkpoints. The legacy scripts.train remains blocked for these models. Preserve
 the successful clone and runs/bc-zone24/baseline.json for independent comparison.

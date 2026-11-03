@@ -245,8 +245,10 @@ Preserve survival-first behavior and freedom to use the upper screen.
 The next implementation stage is mask-consistent PPO: sample from feasible
 actions and use that same normalized distribution for stored log probabilities
 and optimizer updates. Preserve the four-frame/duration-aware contract and
-source checkpoints. The existing joint actor is not supported by train_held;
-no new masked-PPO training entry or native training run exists yet. Per-task
-outcomes, ordinary-stage progression semantics and future regression plans
-must remain explicit. Do not append an external mask to old sampled actions
-while reusing their original likelihoods.
+source checkpoints. The existing joint actor is not supported by train_held.
+The separate implementation is now documented in [MASKED_PPO.md](MASKED_PPO.md):
+234 offline tests pass and a source-preserving policy conversion is prepared.
+Native masked training remains pending. The initial entry selects one seen
+task per run; automatic multi-task scheduling remains pending. Per-task
+outcomes and ordinary-stage progression semantics remain explicit. Do not
+append an external mask to old sampled actions while reusing their likelihoods.
