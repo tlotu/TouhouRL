@@ -81,3 +81,20 @@ control behavior, invalid annotations, and rejection as teacher demonstrations.
 `test_attack_zone.py` covers attack-band dead zones, safe second-best actions,
 both clearance gates, emergency fallback, walls, missing targets, parameter
 validation, targeted legacy equivalence and evaluation-data exclusion.
+
+`test_movement_probe.py` checks baseline gating, candidate reads and frame tags,
+nonfinite/error reporting, OS key high-bit interpretation, requested mode phases,
+Shift transitions and menu exclusion, without native input or process access.
+
+`test_zone_demonstrations.py` verifies fresh-only labels, raw/held provenance,
+observation continuity, slow telemetry, incomplete/duplicate/mixed-source handling,
+legacy PPO rejection, actual supervised optimization and width-preserving reload.
+
+Diagnostic logging tests also verify full-file evidence under compact console
+output, stdout/stderr transcript capture, final numbered paths after errors,
+stream restoration, transcript collision handling and hidden trace events.
+
+`test_held_training.py` covers sampled-action likelihood association, intermediate
+holds, early endings/overshoot, frame rewards and GAE, aborted batches, menu
+boundaries, additional budgets, settings validation, actual gradients and
+optimizer resume, plus CLI publication preserving the source archive.

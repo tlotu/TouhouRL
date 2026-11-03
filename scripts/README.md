@@ -121,3 +121,30 @@ half-width, absolute clearance and maximum clearance loss. Logs include complete
 raw rankings and held executed actions. See `configs/ATTACK_ZONE.md` for the
 width comparison. No model, training, HP feedback or automatic shot-width
 calibration is involved; cloning rejects this experiment's collection type.
+
+`probe_input.py --movement-modes` compares requested slow/fast cardinal/diagonal
+holds in 108 frames and logs owned keys, OS Shift state and baseline movement
+candidates. `evaluate_attack_zone.py --movement-probe` adds the same diagnostics
+without changing control behavior. See configs/MOVEMENT.md. Candidate meanings
+require native verification; these tools do not automatically repair input.
+
+`clone.py --zone-demos PATH...` explicitly validates attack-zone rule/holding
+provenance and slow telemetry, and fits only fresh decisions with versioned
+hazard-zone-v1 features. Legacy --demos stays separate. Evaluate using
+evaluate_control with the saved hold duration; legacy train and correction
+entrypoints reject this contract. See configs/ZONE_CLONING.md.
+
+With a file path, DiagnosticLog saves every full event to JSONL and uses concise
+console summaries, suppressing periodic nonterminal step dumps. Python stdout
+and stderr within the log context are also copied to a sibling .console.log,
+including prompts and the compact summaries. Both actual absolute paths print
+at entry and exit, including errors; existing files and transcripts are preserved
+with numbered names. No-path read-only output keeps its full JSON format. Native
+library output and tracebacks after context exit are outside the transcript;
+exceptions inside the context retain a structured error record.
+
+`train_held.py` continues held-zone clones with one sampled action per held
+decision and frame-duration-aware returns. It requires the matching manual task,
+keeps source archives intact, publishes separate checkpoints, and updates only
+in result menus. Budget units are fresh decisions. See configs/HELD_PPO.md for
+the first smoke command, reward version, conservative settings and resume rules.

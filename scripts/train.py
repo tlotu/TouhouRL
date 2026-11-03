@@ -35,6 +35,8 @@ def main():
     saved = read_checkpoint(args.resume, evaluation=args.evaluate) if args.resume else None
     defaults = {"rollout_steps": 512, "capacity": 128, "max_frames": 3600, "seed": 0}
     config = dict(saved["config"] if saved else defaults)
+    if config.get("decision_contract") == "attack-zone-held-v1":
+        parser.error("Held zone clones require scripts.evaluate_control; this PPO collector uses two-frame decisions")
     for name in defaults:
         requested = getattr(args, name)
         if requested is not None:

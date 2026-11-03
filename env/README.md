@@ -61,3 +61,8 @@ timing. These fields measure host stages rather than exact engine input latency.
 Session/frame-stepper defaults use `time.perf_counter` for sub-frame measurements.
 The older `time.monotonic` implementation on this Windows Python has 15.625 ms
 resolution; zero values in historical logs must not be treated as zero cost.
+
+`movement_probe.py` reads optional baseline-only movement candidates for separate
+diagnostic logs. Fields remain unverified and never enter actor observations or
+control decisions. WindowsKeyboard.shift_state reports OS high bits, not engine
+input consumption. See configs/MOVEMENT.md for provenance and frame alignment.

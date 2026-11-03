@@ -133,6 +133,8 @@ class WindowsKeyboard:
         self.user.GetWindowThreadProcessId.argtypes = [w.HWND, ctypes.POINTER(w.DWORD)]
         self.user.SendInput.argtypes = [w.UINT, ctypes.POINTER(Input), ctypes.c_int]
         self.user.SendInput.restype = w.UINT
+        self.user.GetAsyncKeyState.argtypes = [ctypes.c_int]
+        self.user.GetAsyncKeyState.restype = ctypes.c_short
 
     def is_foreground(self):
         pid = w.DWORD()
@@ -152,6 +154,11 @@ class WindowsKeyboard:
 
     def key_down(self, key):
         self._send(key, False)
+
+    def shift_state(self):
+        # OS high bits describe key state, not the game's consumed input.
+        return {name: bool(self.user.GetAsyncKeyState(vk) & 0x8000)
+                for name, vk in (("shift", 0x10), ("left_shift", 0xA0), ("right_shift", 0xA1))}
 
     def key_up(self, key):
         self._send(key, True)

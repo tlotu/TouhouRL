@@ -1,5 +1,9 @@
 # Small complete-episode PPO
 
+Held-zone clones use the separate `train_held` path documented in HELD_PPO.md.
+This document describes the legacy two-frame collector, which remains unchanged
+and rejects held-zone contracts.
+
 ## Execution contract
 
 Select a fixed spell/character/difficulty manually and start at a recognized

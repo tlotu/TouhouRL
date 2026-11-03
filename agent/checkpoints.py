@@ -5,6 +5,7 @@ import uuid
 
 from env.session import OBSERVATION_SCHEMA
 from .training import REWARD_PROFILE
+from .held_training import HELD_REWARD_PROFILE, PPO_CONTRACT
 
 
 def create_run_directory(requested):
@@ -44,9 +45,13 @@ def save_checkpoint(learner, run_dir, state, config, build):
 def read_checkpoint(path, *, evaluation=False):
     path = Path(path)
     metadata = json.loads((path / "metadata.json").read_text(encoding="utf-8"))
+    allowed_rewards = ("spell-v1", REWARD_PROFILE) if evaluation else (REWARD_PROFILE,)
+    if (metadata.get("config", {}).get("ppo_contract") == PPO_CONTRACT
+            and metadata["config"].get("decision_contract") == "attack-zone-held-v1"):
+        allowed_rewards = (*allowed_rewards, HELD_REWARD_PROFILE)
     if (metadata.get("format") != 1 or metadata.get("complete") is not True
             or metadata.get("schema") != OBSERVATION_SCHEMA
-            or metadata.get("reward_profile") not in (("spell-v1", REWARD_PROFILE) if evaluation else (REWARD_PROFILE,))
+            or metadata.get("reward_profile") not in allowed_rewards
             or not (path / "model.zip").is_file()):
         raise ValueError("Incomplete or incompatible training checkpoint")
     if not isinstance(metadata.get("timesteps"), int) or not isinstance(metadata.get("updates"), int):

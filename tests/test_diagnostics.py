@@ -3,6 +3,8 @@ import io
 import unittest
 from pathlib import Path
 import tempfile
+import json
+import sys
 
 from env.action_emulator import ActionEmulator, InputError
 from env.session import GameSession
@@ -11,6 +13,60 @@ from tests.fakes import FakeClock, FakeKeyboard, FakeReader, sample
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_full_records_survive_compact_console_and_transcript_captures_prompts(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                with DiagnosticLog(Path(directory)/"run.jsonl") as log:
+                    print("Focus the game now", file=sys.stderr)
+                    log.emit({"event": "step", "elapsed_frames": 60, "enemies": [{"hp": 900}]})
+                    log.emit({"event": "episode_end", "episode": 0, "reason": "spell_success",
+                              "enemies": [{"hp": 1}], "extra": "full evidence"})
+            records = [json.loads(line) for line in log.path.read_text().splitlines()]
+            self.assertEqual(records[0]["enemies"][0]["hp"], 900)
+            self.assertEqual(records[1]["extra"], "full evidence")
+            self.assertNotIn("enemies", stdout.getvalue())
+            self.assertNotIn('"event": "step"', stdout.getvalue())
+            transcript = log.console_path.read_text()
+            self.assertIn("Focus the game now", transcript)
+            self.assertIn("spell_success", transcript)
+            self.assertEqual(transcript.count("Diagnostic log:"), 2)
+            self.assertTrue(stderr.getvalue().rstrip().endswith(str(log.console_path.resolve())))
+
+    def test_error_restores_streams_and_reprints_actual_numbered_paths(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            path = Path(directory)/"run.jsonl"
+            path.write_text("original\n")
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                before = sys.stdout, sys.stderr
+                with self.assertRaises(InputError):
+                    with DiagnosticLog(path) as log:
+                        raise InputError("lost focus")
+                self.assertEqual((sys.stdout, sys.stderr), before)
+            self.assertEqual(path.read_text(), "original\n")
+            self.assertEqual(log.path.name, "run-001.jsonl")
+            self.assertIn("lost focus", log.console_path.read_text())
+            self.assertIn(str(log.path.resolve()), log.console_path.read_text())
+
+    def test_existing_transcripts_are_never_overwritten(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            path = Path(directory)/"run.jsonl"
+            transcript = Path(directory)/"run.console.log"
+            transcript.write_text("original transcript\n")
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with DiagnosticLog(path) as log:
+                    log.emit({"event": "summary", "completed_episodes": 1})
+            self.assertEqual(transcript.read_text(), "original transcript\n")
+            self.assertNotEqual(log.console_path, transcript)
+
+    def test_trace_only_events_are_not_mirrored_to_console(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with DiagnosticLog(Path(directory)/"run.jsonl") as log:
+                    log.emit({"event": "transition", "large_observation": [1, 2, 3]}, console=False)
+            self.assertIn("large_observation", log.path.read_text())
+            self.assertNotIn("large_observation", log.console_path.read_text())
+
     def test_existing_logs_are_preserved_and_numbered(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
             requested = Path(directory) / "check.jsonl"

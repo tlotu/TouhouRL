@@ -32,6 +32,8 @@ def main():
     from env.touhou_env import TouhouEnv
 
     config = saved["config"]
+    if config.get("decision_contract") == "attack-zone-held-v1" and args.hold_frames != config["hold_frames"]:
+        parser.error("Zone-clone evaluation must keep the checkpoint hold_frames setting")
     with DiagnosticLog(args.output) as log:
         reader, pid, build = connect(args.pid)
         try:
@@ -53,6 +55,8 @@ def main():
                       "run": True, "trace": True, "repeat": 2, "task": args.task,
                       "capacity": config["capacity"], "max_frames": config["max_frames"],
                       "hold_frames": args.hold_frames,
+                      "decision_contract": config.get("decision_contract"),
+                      "feature_options": config.get("feature_options"),
                       "student_checkpoint": str(Path(args.resume).resolve())})
             print("Start from the same spell RESULT menu and keep game focus. "
                   "This evaluates a network plus action holding, without training or a teacher.",

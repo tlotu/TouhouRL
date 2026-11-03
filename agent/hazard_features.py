@@ -15,8 +15,11 @@ class HazardFeatures(BaseFeaturesExtractor):
     Lasers, acceleration, future spawns, and exact enemy body shapes are absent.
     """
 
-    def __init__(self, observation_space):
+    def __init__(self, observation_space, half_width=6.):
         super().__init__(observation_space, features_dim=62)
+        if not math.isfinite(half_width) or not 0 <= half_width <= 192:
+            raise ValueError("Invalid attack half-width")
+        self.half_width = half_width
         velocities = []
         for keys in DIRECTIONS:
             dx = int("right" in keys) - int("left" in keys)
@@ -57,7 +60,7 @@ class HazardFeatures(BaseFeaturesExtractor):
         index = selected.to(torch.int64).argmax(-1)
         target = enemies[torch.arange(len(enemies), device=enemies.device), index, :2]
         target = torch.where(present[:, None], target, torch.zeros_like(target))
-        alignment = ((target[:, :1] * 384 - velocity[None, :, 0] * 4).abs() - 6).clamp_min(0)
+        alignment = ((target[:, :1] * 384 - velocity[None, :, 0] * 4).abs() - self.half_width).clamp_min(0)
         approach = (target[:, 1:2] * 448 - velocity[None, :, 1] * 4 + 64).clamp_min(0)
         alignment = torch.where(present[:, None], alignment, torch.zeros_like(alignment))
         approach = torch.where(present[:, None], approach, torch.zeros_like(approach))
@@ -67,3 +70,9 @@ class HazardFeatures(BaseFeaturesExtractor):
         density = (bullets[:, :, 6] > 0).to(player.dtype).mean(-1, keepdim=True)
         return torch.cat((player, target, present[:, None].to(player.dtype), density,
                           candidates.flatten(1)), dim=1)
+
+
+class AttackZoneFeatures(HazardFeatures):
+    """Versioned attack-band features; legacy archives retain the six-pixel default."""
+    def __init__(self, observation_space, half_width=24.):
+        super().__init__(observation_space, half_width=half_width)

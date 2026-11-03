@@ -56,3 +56,13 @@ or collision override. It changes the deployed controller, not checkpoint weight
 It gates candidates by absolute clearance and loss from the best candidate before
 ranking attack-band excess. No model or HP feedback is used. See
 `configs/ATTACK_ZONE.md` for parameters and evidence limits.
+
+`zone_demonstrations.py` explicitly validates held attack-zone traces, including
+slow telemetry and action provenance, then extracts fresh decisions only.
+`hazard-zone-v1` serializes its attack width; old hazard-v1 defaults stay intact.
+The new contract blocks incompatible legacy PPO/correction entrypoints. See
+`configs/ZONE_CLONING.md` for collection, cloning, evaluation and the pilot result.
+
+`held_training.py` aggregates one sampled action across its actual held duration
+and computes frame-discounted rewards/GAE. `held_backend.py` uses conservative
+SB3 PPO updates without resetting the restored optimizer. See configs/HELD_PPO.md.

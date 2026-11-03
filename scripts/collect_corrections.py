@@ -33,6 +33,8 @@ def main():
     from env.touhou_env import TouhouEnv
 
     config = saved["config"]
+    if config.get("decision_contract") == "attack-zone-held-v1":
+        parser.error("Zone clones require a matching held-zone teacher; legacy corrections are incompatible")
     with DiagnosticLog(args.output) as log:
         reader, pid, build = connect(args.pid)
         try:

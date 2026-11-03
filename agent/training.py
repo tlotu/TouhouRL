@@ -75,7 +75,8 @@ def collect_episodes(env, learner, minimum_steps, emit):
 
 
 def train_episodic(env, learner, boundary, checkpoint, emit, additional_steps,
-                   rollout_steps=512, completed_updates=0, clock=time.monotonic):
+                   rollout_steps=512, completed_updates=0, clock=time.monotonic,
+                   collector=collect_episodes):
     if additional_steps < 2 or rollout_steps < 2:
         raise ValueError("Step budgets must be at least two")
     start_steps = learner.timesteps
@@ -84,7 +85,7 @@ def train_episodic(env, learner, boundary, checkpoint, emit, additional_steps,
     while learner.timesteps < target:
         started = clock()
         count = max(2, min(rollout_steps, target - learner.timesteps))
-        batch, stats = collect_episodes(env, learner, count,
+        batch, stats = collector(env, learner, count,
                                        lambda row: emit({"update": updates + 1, **row}))
         sampled = clock()
         boundary()

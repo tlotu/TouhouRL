@@ -8,6 +8,7 @@ from agent.attack_zone import AttackZoneConfig, AttackZonePolicy
 from env.action_emulator import ActionEmulator
 from env.session import GameSession, OBSERVATION_SCHEMA
 from env.windows import WindowsKeyboard, connect
+from env.movement_probe import MovementProbe, annotate_movement
 from scripts.diagnostics import DiagnosticLog, run_episodes, timing_clock_info
 
 
@@ -22,6 +23,8 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--pid", type=int)
     parser.add_argument("--focus-timeout", type=float, default=30)
+    parser.add_argument("--movement-probe", action="store_true",
+                        help="Log OS Shift and baseline-only candidate movement fields")
     args = parser.parse_args()
     try:
         config = AttackZoneConfig(args.half_width, args.min_clearance, args.max_clearance_loss)
@@ -36,6 +39,7 @@ def main():
             if "SPELL_RESULT_ACTIVE" not in reader.addresses:
                 raise RuntimeError("Attack-zone evaluation requires validated spell-result fields")
             controls = ActionEmulator(WindowsKeyboard(pid))
+            movement = MovementProbe(reader, build) if args.movement_probe else None
             session = GameSession(reader, controls, repeat=2, capacity=128,
                                   max_frames=3600, spell_retry=True)
         except BaseException:
@@ -51,6 +55,9 @@ def main():
                       "capacity": 128, "max_frames": 3600, "hold_frames": args.hold_frames,
                       "attack_zone": asdict(config), "prediction_frames": 12,
                       "aim_projection_frames": 4})
+            if movement is not None:
+                log.emit({"event": "movement_probe_enabled", "verified": False,
+                          "source": "reference tools/offsets.py and verify_focus.py"})
             print("Start from the same spell RESULT menu and keep focus. "
                   "Rule-only experiment: width is uncalibrated; no model, training or HP feedback.",
                   file=sys.stderr)
@@ -67,6 +74,8 @@ def main():
                                      if c["action"] == row["action"]), None)
                     row["executed_candidate"] = executed
                     row["executed_meets_clearance_gate"] = bool(executed and executed["eligible"])
+                    if movement is not None:
+                        row = annotate_movement(row, movement, controls)
                 log.emit(row, console=row["event"] != "transition")
             try:
                 run_episodes(session, args.episodes, emit, policy="attack_zone", trace=True,

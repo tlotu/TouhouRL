@@ -12,28 +12,79 @@ def timing_clock_info():
             "resolution_seconds": info.resolution, "monotonic": info.monotonic}
 
 
+class _Tee:
+    def __init__(self, stream, transcript):
+        self.stream, self.transcript = stream, transcript
+
+    def write(self, value):
+        self.transcript.write(value)
+        self.transcript.flush()
+        return self.stream.write(value)
+
+    def flush(self):
+        self.transcript.flush()
+        self.stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
+def _compact_event(record):
+    if record.get("event") == "held_decision":
+        return None
+    if record.get("event") == "step" and not (record.get("terminated") or record.get("truncated")):
+        return None
+    keys = ("event", "episode", "steps", "elapsed_frames", "reason", "policy", "task",
+            "completed_episodes", "successful_episodes", "classified_failure_episodes",
+            "success_rate", "epoch", "selected_epoch", "checkpoint", "type", "message",
+            "update", "updates", "timesteps", "additional_steps", "additional_decisions",
+            "batch_steps", "episodes", "successes", "logic_frames", "substeps")
+    brief = {key: record[key] for key in keys if key in record}
+    validation = record.get("validation", {})
+    if isinstance(validation, dict) and "accuracy" in validation:
+        brief["validation_accuracy"] = validation["accuracy"]
+    metrics = record.get("metrics", {})
+    if isinstance(metrics, dict) and "train/approx_kl" in metrics:
+        brief["approx_kl"] = metrics["train/approx_kl"]
+    return json.dumps(brief, allow_nan=False)
+
+
 class DiagnosticLog:
     def __init__(self, path=None):
         self.path = Path(path) if path else None
         self.file = None
+        self.console_file = None
+        self.console_path = None
+
+    @staticmethod
+    def _open_new(requested):
+        for index in range(10000):
+            candidate = (requested if index == 0 else
+                         requested.with_name(f"{requested.stem}-{index:03d}{requested.suffix}"))
+            try:
+                return candidate, candidate.open("x", encoding="utf-8")
+            except FileExistsError:
+                continue
+        raise FileExistsError(f"No unused log name available for {requested}")
 
     def __enter__(self):
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            requested = self.path
-            for index in range(10000):
-                candidate = (requested if index == 0 else
-                             requested.with_name(f"{requested.stem}-{index:03d}{requested.suffix}"))
-                try:
-                    self.file = candidate.open("x", encoding="utf-8")
-                except FileExistsError:
-                    continue
-                self.path = candidate
-                break
-            else:
-                raise FileExistsError(f"No unused log name available for {requested}")
-            print(f"Diagnostic log: {self.path}", file=sys.stderr)
+            self.path, self.file = self._open_new(self.path)
+            try:
+                self.console_path, self.console_file = self._open_new(self.path.with_suffix(".console.log"))
+            except BaseException:
+                self.file.close()
+                raise
+            self.original_stdout, self.original_stderr = sys.stdout, sys.stderr
+            sys.stdout = _Tee(sys.stdout, self.console_file)
+            sys.stderr = _Tee(sys.stderr, self.console_file)
+            self._print_paths()
         return self
+
+    def _print_paths(self):
+        print(f"Diagnostic log: {self.path.resolve()}", file=sys.stderr)
+        print(f"Console log: {self.console_path.resolve()}", file=sys.stderr)
 
     def emit(self, record, console=True):
         line = json.dumps(record, allow_nan=False)
@@ -41,7 +92,9 @@ class DiagnosticLog:
             self.file.write(line + "\n")
             self.file.flush()
         if console:
-            print(line, flush=True)
+            visible = _compact_event(record) if self.file else line
+            if visible is not None:
+                print(visible, flush=True)
 
     def __exit__(self, kind, error, traceback):
         try:
@@ -49,7 +102,12 @@ class DiagnosticLog:
                 self.emit({"event": "error", "type": type(error).__name__, "message": str(error)})
         finally:
             if self.file:
-                self.file.close()
+                try:
+                    self._print_paths()
+                finally:
+                    sys.stdout, sys.stderr = self.original_stdout, self.original_stderr
+                    self.file.close()
+                    self.console_file.close()
 
 
 def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False, action_fn=None):

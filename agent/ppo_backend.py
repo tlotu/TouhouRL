@@ -14,7 +14,7 @@ from .training import Decision
 
 
 class PPOBackend:
-    def __init__(self, env, seed=0, rollout_steps=512, checkpoint=None, features="flat"):
+    def __init__(self, env, seed=0, rollout_steps=512, checkpoint=None, features="flat", feature_options=None):
         torch.set_num_threads(1)
         if checkpoint:
             self.model = PPO.load(checkpoint, env=env, device="cpu")
@@ -23,6 +23,10 @@ class PPOBackend:
             if features == "hazard-v1":
                 from .hazard_features import HazardFeatures
                 policy_kwargs["features_extractor_class"] = HazardFeatures
+            elif features == "hazard-zone-v1":
+                from .hazard_features import AttackZoneFeatures
+                policy_kwargs["features_extractor_class"] = AttackZoneFeatures
+                policy_kwargs["features_extractor_kwargs"] = dict(feature_options or {})
             elif features != "flat":
                 raise ValueError("Unknown feature extractor")
             self.model = PPO("MultiInputPolicy", env, device="cpu", seed=seed,
@@ -39,14 +43,16 @@ class PPOBackend:
     def timesteps(self):
         return self.model.num_timesteps
 
-    def act(self, obs):
+    def act(self, obs, deterministic=False):
         self.model.policy.set_training_mode(False)
         tensor, _ = self.model.policy.obs_to_tensor(obs)
         with torch.no_grad():
-            action, value, log_prob = self.model.policy(tensor)
+            action, value, log_prob = self.model.policy(tensor, deterministic=deterministic)
         return Decision(int(action.item()), float(value.item()), float(log_prob.item()))
 
-    def update(self, transitions, target_timesteps):
+    def update(self, transitions, target_timesteps, frame_discounts=None):
+        if frame_discounts is None and any(hasattr(row, "duration_frames") for row in transitions):
+            raise ValueError("Held transitions require explicit frame discounts")
         model = self.model
         buffer = DictRolloutBuffer(len(transitions), model.observation_space, model.action_space,
                                    device=model.device, gamma=model.gamma,
@@ -56,7 +62,13 @@ class PPOBackend:
                        np.array([row.episode_start]), torch.tensor([row.value]),
                        torch.tensor([row.log_prob]))
         # Every collected episode is truly terminal; no artificial truncations.
-        buffer.compute_returns_and_advantage(torch.zeros(1, device=model.device), np.array([True]))
+        if frame_discounts is None:
+            buffer.compute_returns_and_advantage(torch.zeros(1, device=model.device), np.array([True]))
+        else:
+            from .held_training import duration_gae
+            advantages, returns = duration_gae(transitions, *frame_discounts)
+            buffer.advantages[:] = np.asarray(advantages, dtype=np.float32)[:, None]
+            buffer.returns[:] = np.asarray(returns, dtype=np.float32)[:, None]
         model.rollout_buffer = buffer
         model.num_timesteps += len(transitions)
         model._current_progress_remaining = max(0.0, 1 - model.num_timesteps / target_timesteps)
