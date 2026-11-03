@@ -78,6 +78,10 @@ motion and refuses to join switch-response observations across missing steps.
 reversals and neutral actions, frame overshoot, episode reset isolation, hold=2
 control behavior, invalid annotations, and rejection as teacher demonstrations.
 
+`test_control_evaluation.py` checks explicit task-transfer consent and reasons,
+unchanged source identities, pre-connection rejection, saved hold enforcement,
+and frozen CLI evaluation through retries with model hashes and console records.
+
 `test_attack_zone.py` covers attack-band dead zones, safe second-best actions,
 both clearance gates, emergency fallback, walls, missing targets, parameter
 validation, targeted legacy equivalence and evaluation-data exclusion.
