@@ -9,6 +9,7 @@ from agent.checkpoints import read_checkpoint
 from env.action_emulator import ActionEmulator
 from env.session import GameSession, OBSERVATION_SCHEMA
 from env.windows import WindowsKeyboard, connect
+from env.frame_stepper import ACQUISITION_CONTRACT
 from scripts.diagnostics import DiagnosticLog, run_episodes, timing_clock_info
 
 
@@ -102,6 +103,7 @@ def main():
                                           lambda: session.elapsed_frames, args.hold_frames)
             log.emit({"event": "connected", "pid": pid, "build_md5": build,
                       "schema": OBSERVATION_SCHEMA, "timing_clock": timing_clock_info(),
+                      "acquisition_contract": ACQUISITION_CONTRACT,
                       "policy": policy_name, "collection": collection,
                       "run": True, "trace": True, "repeat": 2, "task": args.task,
                       "capacity": config["capacity"], "max_frames": config["max_frames"],
@@ -124,11 +126,24 @@ def main():
             controls.wait_for_focus(args.focus_timeout)
             session.verify_training_boundary()
 
+            trace_context = {"episode": None, "next_step": 0}
             def emit(row):
+                if row["event"] == "reset":
+                    trace_context.update(episode=row["episode"], next_step=0)
+                elif row["event"] == "transition":
+                    trace_context["next_step"] = row["step"] + 1
                 log.emit(choose.annotate(row), console=row["event"] != "transition")
             try:
                 run_episodes(session, args.episodes, emit, trace=True,
                              policy=policy_name, action_fn=choose)
+            except BaseException as exc:
+                if choose.last is not None:
+                    log.emit({"event": "interrupted_decision", "episode": trace_context["episode"],
+                              "step": trace_context["next_step"],
+                              "last_observed_elapsed_frames": session.elapsed_frames,
+                              "type": type(exc).__name__, "message": str(exc),
+                              "pending_decision": dict(choose.last)})
+                raise
             finally:
                 log.emit(choose.summary())
 

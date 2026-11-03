@@ -5,7 +5,7 @@ import struct
 import unittest
 from unittest.mock import patch
 
-from env.memory_reader import (MemoryReader, MemoryReadError, REQUIRED,
+from env.memory_reader import (MemoryReader, MemoryReadError, SnapshotRaceError, REQUIRED,
                                UnsupportedBuildError, load_profile)
 
 
@@ -105,7 +105,7 @@ class MemoryTests(unittest.TestCase):
     def test_consistently_torn_sample_fails(self):
         frames = iter(range(6))
         self.reader.frame = lambda: next(frames)
-        with self.assertRaises(MemoryReadError):
+        with self.assertRaises(SnapshotRaceError):
             self.reader.snapshot()
 
     def test_close(self):

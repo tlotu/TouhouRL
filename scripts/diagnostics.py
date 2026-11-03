@@ -34,7 +34,8 @@ def _compact_event(record):
         return None
     if record.get("event") == "step" and not (record.get("terminated") or record.get("truncated")):
         return None
-    keys = ("event", "episode", "steps", "elapsed_frames", "reason", "policy", "task",
+    keys = ("event", "episode", "step", "steps", "elapsed_frames", "last_observed_elapsed_frames",
+            "reason", "policy", "task", "incomplete_episodes", "all_requested_completed",
             "completed_episodes", "successful_episodes", "classified_failure_episodes",
             "success_rate", "epoch", "selected_epoch", "checkpoint", "type", "message",
             "update", "updates", "timesteps", "additional_steps", "additional_decisions",
@@ -172,6 +173,7 @@ def run_episodes(session, episodes, emit, seed=0, policy="random", trace=False, 
               "max_bullet_count": max_bullets, "max_dropped_bullets": max_dropped,
               "radius_fallback_steps": fallback_steps, "max_radius_fallback_count": max_fallback,
               "completed_episodes": completed, "death_or_retry_episodes": failures,
+              "incomplete_episodes": max(0, resets - completed),
               "successful_episodes": successes, "classified_failure_episodes": classified_failures,
               "unresolved_episodes": completed - failures - successes,
               "success_rate": successes / completed if completed and successes + classified_failures == completed else None,

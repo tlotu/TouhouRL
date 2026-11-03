@@ -11,6 +11,10 @@ class MemoryReadError(RuntimeError):
     """A sample is missing, inconsistent, or invalid."""
 
 
+class SnapshotRaceError(MemoryReadError):
+    """Every attempted capture crossed a game frame; no sample was accepted."""
+
+
 class UnsupportedBuildError(RuntimeError):
     pass
 
@@ -164,7 +168,7 @@ class MemoryReader:
                 raise MemoryReadError("Invalid player state or death count")
             return Snapshot(end, scene, wanted, lives, bombs, deaths, dying,
                             retry, state, x, y, bullets, enemies, menu)
-        raise MemoryReadError("Game advanced during every sample; retry acquisition")
+        raise SnapshotRaceError("Game advanced during every sample; retry acquisition")
 
     def _bullets(self):
         # Layout taken from the reference build; verify it on each new build.

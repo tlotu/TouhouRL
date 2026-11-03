@@ -356,5 +356,10 @@ selection rather than assuming more centered success trajectories cover escape.
 If it fails, inspect the prediction/ranking and lifecycle observations before
 using new labels. The teacher comparison completed three successes. A separate
 optional boundary-mask experiment is now implemented in BOUNDARY_CONTROL.md;
-the default actor and teacher modes remain unchanged. Masked native results,
-held edge-state corrections and lifecycle tracking remain pending.
+the default actor and teacher modes remain unchanged. Initial masking completed
+three successes, with three applied lower-boundary choices and no right-wall
+intervention. Repeated masked evaluation later obtained ten complete successes
+across the interrupted and completion batches; BOUNDARY_CONTROL.md records the
+separate outcomes and survival objective. Masked older-task regressions passed
+three episodes per task. Held edge-state corrections, lifecycle tracking and
+mask-consistent PPO remain pending.

@@ -333,6 +333,8 @@ sources and per-task episode splits, see [configs/ZONE_CLONING.md](configs/ZONE_
 Held PPO continuation is documented in [configs/HELD_PPO.md](configs/HELD_PPO.md).
 For the separate frozen-actor boundary-mask experiment, see
 [configs/BOUNDARY_CONTROL.md](configs/BOUNDARY_CONTROL.md).
+Frame-crossing acquisition recovery and interrupted-run handling are documented
+in [configs/STATE_ACQUISITION.md](configs/STATE_ACQUISITION.md).
 
 Install optional training dependencies, then run the offline tests first:
 

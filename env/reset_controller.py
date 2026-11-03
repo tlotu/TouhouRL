@@ -1,5 +1,6 @@
 """Bounded retries for an explicitly selected spell-practice task."""
 import time
+from .memory_reader import SnapshotRaceError
 
 
 class ResetError(RuntimeError):
@@ -37,7 +38,13 @@ class ResetController:
         next_navigation = 0.0
         while self.clock() < deadline:
             self.controls.check_focus()
-            sample = self.reader.snapshot()
+            try:
+                sample = self.reader.snapshot()
+            except SnapshotRaceError:
+                self.sleep(0.01)
+                continue
+            if self.clock() >= deadline:
+                break
             menu = sample.result_menu
             if first and sample.ready:
                 if initial_frame is None:

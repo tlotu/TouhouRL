@@ -27,7 +27,7 @@ result menu and retain the same checkpoint, half-width, capacity and frame limit
 This is a frozen actor plus a declared controller constraint, not the original
 unmodified network controller or a new trained policy. Default evaluations remain
 unchanged without --boundary-mask. Do not pool this experiment with the original
-two-of-three zero-shot result. Native masked results are still pending.
+two-of-three zero-shot result. The first native masked result is recorded below.
 
 ## Selection contract
 
@@ -97,3 +97,156 @@ tests. No native input was sent during implementation or offline verification.
 Training with a mask would require applying the same mask in the sampled PPO
 distribution and its log probabilities. External action replacement with an
 unmasked likelihood is not supported; this option only exists in evaluation.
+
+## Initial native masked result
+
+runs/bc-zone24-joint-stage06-spiral-boundary-eval.jsonl completed three successes,
+zero deaths and two retries, at 1137/1232/1129 frames. Mean time to result was
+19.43 seconds. Source archive hash still matches the original joint reference.
+
+| Episode | Direct left/right reversals | Changed mask proposals | Applied fresh mask choices | Hold interruptions |
+| --- | --- | --- | --- | --- |
+| 0 | 3 | 5 | 3 | 0 |
+| 1 | 2 | 0 | 0 | 0 |
+| 2 | 3 | 0 | 0 | 0 |
+
+All three applied changes were near the lower boundary at y=429.37, logged end
+frames 614/618/622: down-left was excluded and stay selected. The other two
+changed proposals occurred inside an existing hold. Summary totals distinguish
+five mask proposals, 173 commitment overrides and 176 final/raw differences;
+these are different, potentially overlapping counts. No right-wall intervention
+occurred. Episode 2 briefly reached x=328.85, but no active sample reached x>=368.
+
+Replaying all 1750 logged transitions with their saved actor scores exactly
+reproduced selected actions, mask sets, hold ages, interruption flags and summary
+counts. There were no executed-horizon constraint violations. All observed frame
+intervals were 1 or 2; all 231 steady interior motion samples were about
+2 px/frame. Peak bullet count was 278, omitting up to 150 from observations;
+radius fallbacks were zero. This entry does not collect internal slow telemetry.
+
+The batch supports a successful initial composite-controller run. Two episodes
+never required masking, and the old right-corner failure was not reproduced, so
+the three unpaired trials do not establish that masking caused the full apparent
+improvement or fixed right-edge escape. See
+runs/bc-zone24-joint-stage06-spiral-boundary-eval-analysis.json and the separate
+boundary_evaluations entry in the joint baseline manifest. Original actor and
+teacher results remain separate; no source weights or defaults changed.
+
+Repeat ten episodes with the same spell, character, equipment and difficulty,
+starting at the result menu:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_control --resume runs/bc-zone24-joint/checkpoints/update-000000 --boundary-mask --hold-frames 4 --episodes 10 --task stage06-spiral-delayed-character01-normal --allow-task-transfer --transfer-reason "Spiral task; frozen actor with explicit hold-endpoint boundary mask" --output runs/bc-zone24-joint-stage06-spiral-boundary-repeat.jsonl
+```
+
+Inspect applied interventions and right-edge coverage, not just the success
+count. Natural repeated runs may still miss the old trap; deliberate edge-state
+testing remains a separate possible experiment. Ten-episode results, hold
+interruption under native overshoot and masked regressions on the two trained
+spells remain pending. No fitting or PPO continuation is started by this run.
+
+The repeated run later completed seven successes and aborted in episode 7 on
+frame-crossing acquisition, with no verified eighth outcome. Episodes 5/6 had
+28/59 applied right-boundary replacements and succeeded. Preserve that partial
+evidence and finish three more episodes after the bounded retry repair; see
+[STATE_ACQUISITION.md](STATE_ACQUISITION.md). The earlier ten-episode command is
+the historical requested run, not a statement that ten episodes completed.
+
+## Completion episodes and survival objective
+
+The actual completion log is
+runs/bc-zone24-joint-stage06-spiral-boundary-repeat-remaining-001.jsonl. It used
+same-frame-bounded-retry-v1 and completed three successes at 2440/1125/1115
+frames, zero deaths, without another acquisition error. All frame-race retry
+counts were zero, so the native recovery branch itself was not exercised.
+
+In episode 0, the player reached y=74.24, spent 856 active frames in the upper
+half, and spent 152 frames within 16 px of the boss's height. Boss HP continued
+decreasing; the last collidable sample had 1 HP at frame 2318, followed by native
+success. The user observed homing shots completing the fight; projectile type
+is not directly recorded. There were 30 applied right-boundary mask choices,
+with no execution-horizon violation. Episodes 1/2 used lower routes without
+mask interventions. All 2341 transitions replayed with matching provenance.
+
+The planned repeat now has seven plus three complete successes, preserving the
+earlier interrupted episode separately. Including initial acceptance, the masked
+controller has 13 complete spiral successes and one unknown interrupted outcome.
+No weights changed. Source hashes and details are in
+runs/bc-zone24-joint-stage06-spiral-boundary-repeat-remaining-001-analysis.json.
+
+Survival remains the primary objective. Do not add an absolute upper-screen
+penalty or forbid a successful route merely because it differs from the teacher
+or takes longer. Physical boundary feasibility is a hard constraint; tactical
+height, alignment and damage efficiency remain task-dependent. Being at the
+boss's height is not itself a collision measurement. Some tasks may require
+upper routes or circling, and homing equipment changes the alignment tradeoff.
+
+Keep normal-stage progression, boss defeat/card capture and spell-practice
+result semantics distinct. The user's description of timeout allowing ordinary
+stage progression is not a validated full-stage outcome detector in this repo.
+Existing native practice failures and time-limit truncations are not relabeled
+globally. No reward profile, upper-area restriction or terminal classifier was
+changed in this analysis.
+
+Spiral repeated acceptance can now stop. Before making this optional controller
+a general default, run three regressions on each trained spell. Select each
+spell manually with the same character/equipment/difficulty and start from its
+result menu. Both tasks are seen, so no transfer flag is required:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_control --resume runs/bc-zone24-joint/checkpoints/update-000000 --boundary-mask --hold-frames 4 --episodes 3 --task spell01-character01-normal --output runs/bc-zone24-joint-stage01-boundary-eval.jsonl
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_control --resume runs/bc-zone24-joint/checkpoints/update-000000 --boundary-mask --hold-frames 4 --episodes 3 --task stage06-straight-dense-character01-normal --output runs/bc-zone24-joint-stage06-straight-boundary-eval.jsonl
+```
+
+Results of these regressions follow. Deliberate edge recovery, lifecycle
+tracking and PPO mask integration remain pending. The latest offline suite
+remains 227 passing tests; this stage changed analysis and documentation only.
+
+## Regression-checked reference configuration
+
+Both trained-task regressions completed successfully with the same frozen actor,
+hold-endpoint-mask-v1 and same-frame-bounded-retry-v1:
+
+| Task | Native result | Frames to result | Mean seconds |
+| --- | --- | --- | --- |
+| Stage 1 | 3 successes, zero deaths | 946/1007/1011 | 16.47 |
+| Dense straight stage 6 | 3 successes, zero deaths | 723/700/766 | 12.16 |
+
+The actual straight-spell log ends in boundary-eval-001.jsonl. Both runs had
+zero mask proposals changed, zero hold interruptions, zero frame-race retries,
+zero incomplete episodes and no errors. All 2578 transitions replayed correctly,
+with no modeled execution-horizon violations. These runs check compatibility
+on normal routes; they do not add rare edge-intervention coverage.
+
+Frame intervals were 1 or 2. Stage 1 had 172 steady interior speed samples at
+2 px/frame. The straight spell had 164 at 2 and one each at 1/3 in consecutive
+two-frame leftward intervals (steps 180/181, episode 0). Their combined speed
+was 2 px/frame over four frames; this is not evidence of sustained high speed.
+No internal slow flags were collected. Peak bullet counts were 69/240, with
+0/112 omitted and no radius fallbacks. The race-recovery branch remains without
+a native triggered example despite clean runs of the updated acquisition path.
+
+Reports and source hashes are in
+runs/bc-zone24-joint-boundary-regression-analysis.json. The explicit recommended
+reference configuration is runs/bc-zone24-joint/recommended-control.json; it
+records source hashes, model hash, both control contracts, geometry and task
+counts. baseline.json points to it and retains every raw, teacher and masked
+batch separately. This recommends an experimental reference, not a universal
+success guarantee. CLI masking remains opt-in, with no changed weights/defaults.
+
+Current masked complete results are 3 successes on stage 1, 3 on the dense
+straight spell and 13 on the spiral spell, with the older spiral infrastructure
+interruption kept separately. Stop repeating these same acceptance runs.
+Preserve survival-first behavior and freedom to use the upper screen.
+
+The next implementation stage is mask-consistent PPO: sample from feasible
+actions and use that same normalized distribution for stored log probabilities
+and optimizer updates. Preserve the four-frame/duration-aware contract and
+source checkpoints. The existing joint actor is not supported by train_held;
+no new masked-PPO training entry or native training run exists yet. Per-task
+outcomes, ordinary-stage progression semantics and future regression plans
+must remain explicit. Do not append an external mask to old sampled actions
+while reusing their original likelihoods.

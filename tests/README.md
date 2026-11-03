@@ -104,6 +104,10 @@ execution-horizon masks, raw/masked/held provenance, safe hold continuation,
 overshoot interruption, reset boundaries, interior equivalence, invalid inputs
 and a separate fake CLI run preserving source archives and excluding teacher use.
 
+`test_snapshot_recovery.py` checks frame-race recovery under fixed deadlines,
+measured frame deltas, fatal read and focus-loss propagation, reset/menu/update
+boundaries, failed-step key cleanup, and incomplete/pending-decision diagnostics.
+
 Diagnostic logging tests also verify full-file evidence under compact console
 output, stdout/stderr transcript capture, final numbered paths after errors,
 stream restoration, transcript collision handling and hidden trace events.

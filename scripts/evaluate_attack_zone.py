@@ -9,6 +9,7 @@ from env.action_emulator import ActionEmulator
 from env.session import GameSession, OBSERVATION_SCHEMA
 from env.windows import WindowsKeyboard, connect
 from env.movement_probe import MovementProbe, annotate_movement
+from env.frame_stepper import ACQUISITION_CONTRACT
 from scripts.diagnostics import DiagnosticLog, run_episodes, timing_clock_info
 
 
@@ -50,6 +51,7 @@ def main():
             choose = ActionCommitment(rule, lambda: session.elapsed_frames, args.hold_frames)
             log.emit({"event": "connected", "pid": pid, "build_md5": build,
                       "schema": OBSERVATION_SCHEMA, "timing_clock": timing_clock_info(),
+                      "acquisition_contract": ACQUISITION_CONTRACT,
                       "policy": "attack_zone", "collection": "attack_zone_evaluation",
                       "run": True, "trace": True, "repeat": 2, "task": args.task,
                       "capacity": 128, "max_frames": 3600, "hold_frames": args.hold_frames,

@@ -3,6 +3,7 @@ import time
 
 from .frame_stepper import FrameStepper, FrameTimeout
 from .reset_controller import ResetController
+from .memory_reader import SnapshotRaceError
 
 ENEMY_CAPACITY = 16
 OBSERVATION_SCHEMA = "touhourl-state-v2"
@@ -133,7 +134,13 @@ class GameSession:
                     if self.clock() >= deadline:
                         raise RuntimeError("Result menu did not settle into an interpretable phase")
                     self.sleep(0.01)
-                    self.sample = self.reader.snapshot()
+                    try:
+                        current = self.reader.snapshot()
+                    except SnapshotRaceError:
+                        continue
+                    if self.clock() >= deadline:
+                        raise RuntimeError("Result-menu acquisition exceeded the verification deadline")
+                    self.sample = current
                     if self.sample.result_menu is None or (saw_result and not self.sample.result_menu.active):
                         raise RuntimeError("Result menu disappeared before outcome verification")
                     saw_result = saw_result or self.sample.result_menu.active
@@ -179,10 +186,20 @@ class GameSession:
             raise RuntimeError("Training update requires an ended, open session")
         self.controls.release_all()
         self.controls.check_focus()
-        current = self.reader.snapshot()
-        if current.result_menu is None or current.result_menu.outcome is None:
-            raise RuntimeError("Training boundary is no longer a settled spell-result menu")
-        return current.result_menu.outcome
+        deadline = self.clock() + 0.5
+        while self.clock() < deadline:
+            self.controls.check_focus()
+            try:
+                current = self.reader.snapshot()
+            except SnapshotRaceError:
+                self.sleep(0.001)
+                continue
+            if self.clock() >= deadline:
+                break
+            if current.result_menu is None or current.result_menu.outcome is None:
+                raise RuntimeError("Training boundary is no longer a settled spell-result menu")
+            return current.result_menu.outcome
+        raise FrameTimeout("State acquisition exceeded the training-boundary verification deadline")
 
     def __enter__(self):
         return self
