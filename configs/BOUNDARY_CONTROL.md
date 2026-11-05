@@ -252,3 +252,20 @@ Native masked training remains pending. The initial entry selects one seen
 task per run; automatic multi-task scheduling remains pending. Per-task
 outcomes and ordinary-stage progression semantics remain explicit. Do not
 append an external mask to old sampled actions while reusing their likelihoods.
+
+## First native remaining-hold interruption
+
+`runs/ppo-masked-zone24-1k-spiral-eval.jsonl`, episode 2 step 517, provides
+the first verified native interruption example. At elapsed frame 1034,
+x=373.598/y=414, the held up-right action is two frames old. Its remaining
+two-frame endpoint would cross x=376, so the controller starts a fresh
+four-frame choice and selects left. All action/mask/age fields replay exactly;
+no modeled execution violation occurs. No three-frame step or acquisition race
+is needed to trigger this check: nominal motion and sampled native displacement
+can differ. This branch is now covered by native evidence, while actual
+frame-race recovery remains unobserved in these runs.
+
+The episode later fails with a recorded death at frame 1046. Interruption
+correctness does not establish collision avoidance or that the interruption
+caused the death. See `runs/ppo-masked-zone24-1k-spiral-eval-analysis.json` for
+the full transition evidence and fixed-observation policy comparisons.

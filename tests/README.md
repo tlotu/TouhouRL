@@ -122,4 +122,16 @@ sampling/update likelihood consistency, actual actor gradients, exact optimizer
 tensor restoration and a second update, rejection of unmasked likelihoods,
 remaining-hold interruption, reward distinctions, offline conversion, task and
 evaluation guards, and fake-native training publication without changing source
-archives. The full suite passes 234 tests with training dependencies installed.
+archives. This masked-PPO milestone had 234 passing tests.
+
+`test_risk_control.py` adds seven checks for linear collision-course filtering,
+emergency fallback, physical versus forecast horizons, held-action preservation,
+feature-geometry agreement, explicit CLI guards and fake-native provenance /
+source preservation / teacher-data exclusion. The current full suite passes
+241 tests with training dependencies installed.
+
+`test_risk_ppo.py` adds six tests for explicit contract migration, controller /
+policy candidate agreement, sampled likelihoods, nonempty Adam preservation,
+actual actor updates and restored updates, configuration guards, source-preserving
+preparation, canonical evaluation and fake-native risk training diagnostics.
+The current full suite passes 247 tests.

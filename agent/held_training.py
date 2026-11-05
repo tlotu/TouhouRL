@@ -62,6 +62,7 @@ def collect_held_episodes(env, learner, minimum_steps, emit, hold_frames=4,
         while True:
             before = deepcopy(obs)
             decision = learner.act(obs)
+            sampling_context = deepcopy(getattr(learner, "decision_context", {}))
             if (type(decision.action) is not int or not 0 <= decision.action < 9
                     or not math.isfinite(decision.value) or not math.isfinite(decision.log_prob)):
                 raise TrainingError("Invalid sampled held decision")
@@ -94,7 +95,8 @@ def collect_held_episodes(env, learner, minimum_steps, emit, hold_frames=4,
             emit({"event": "held_decision", "episode": episodes, "decision": episode_decisions,
                   "action": decision.action, "log_prob": decision.log_prob, "value": decision.value,
                   "reward": reward, "duration_frames": duration, "terminated": terminated,
-                  "hold_interrupted": duration < hold_frames and not terminated})
+                  "hold_interrupted": duration < hold_frames and not terminated,
+                  **({"sampling_context": sampling_context} if sampling_context else {})})
             if terminated:
                 episodes += 1
                 successes += int(info["reason"] == "spell_success")

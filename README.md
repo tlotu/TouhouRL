@@ -335,6 +335,9 @@ For the separate frozen-actor boundary-mask experiment, see
 [configs/BOUNDARY_CONTROL.md](configs/BOUNDARY_CONTROL.md).
 For mask-consistent PPO from the joint clone, see
 [configs/MASKED_PPO.md](configs/MASKED_PPO.md).
+For the optional frozen-actor clearance gate, see
+[configs/RISK_CONTROL.md](configs/RISK_CONTROL.md).
+Risk-consistent PPO migration and training are in [configs/RISK_PPO.md](configs/RISK_PPO.md).
 Frame-crossing acquisition recovery and interrupted-run handling are documented
 in [configs/STATE_ACQUISITION.md](configs/STATE_ACQUISITION.md).
 
@@ -348,7 +351,7 @@ Install optional training dependencies, then run the offline tests first:
 The two test_ppo_backend tests must run rather than skip. They check an actual
 optimizer update, GAE boundaries, and checkpoint loading. All 120 tests now pass
 with the training dependencies installed at that milestone. The current full
-suite passes 234 tests, including masked-policy updates and optimizer restoration.
+suite passes 247 tests, including risk-consistent updates, optimizer restoration and risk filtering.
 
 Select the spell manually and enter its success or failure RESULT menu. Then:
 

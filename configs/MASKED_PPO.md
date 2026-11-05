@@ -400,3 +400,56 @@ and start each command at the selected spell's result menu:
 
 CLI task labels do not select or identify native spells. Retain all per-model,
 per-task results and review these regressions before further optimization.
+
+## Update-3 regressions: stage 1 passed, spiral two of three
+
+Stage 1 succeeds at 967/1052/1029 frames with zero deaths. The spiral task
+succeeds at 1675/1203 frames and fails with one death at 1046. Reset signatures
+match the intended tasks and all sources retain their prior model hashes.
+Per-file reports and `runs/ppo-masked-zone24-1k-cross-task-analysis.json` record
+the separate outcomes; the evaluated-model register retains the earlier dense
+three-of-three result without pooling different checkpoints.
+
+All 3488 transitions replay correctly. No acquisition race retries or radius
+fallbacks occur. Spiral has 56 mask-proposal changes, 29 applied fresh mask
+choices and one correctly replayed native hold interruption (episode 2 step
+517). The first spiral episode visits the left edge and succeeds; the failed
+episode visits the right edge, with 27 direct left/right reversals. Peak spiral
+bullets=270, maximum omitted=142. Boundary feasibility does not guarantee a
+safe escape from a dense pattern.
+
+On the 1963 recorded spiral states, update 1 versus update 3 has 16 proposal
+differences, 13 at fresh decisions. The failed episode has four differences,
+last at elapsed frame 832; all later proposals agree. Original BC also agrees
+through the final segment. These are open-loop checks, not native alternatives
+that establish causality. Some teacher actions are excluded by its 12-frame
+endpoint model even when the controller's four-frame endpoint is feasible.
+
+Pause further optimization and retain BC/update 1 as references. Three unpaired
+episodes do not prove regression, but update 3 has not earned promotion. Run
+one contemporaneous three-episode comparison of the frozen pre-continuation
+update 1 on the current spiral spell, with the same character/equipment/difficulty:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_control --resume runs/ppo-masked-zone24-smoke-001/checkpoints/update-000001 --boundary-mask --hold-frames 4 --episodes 3 --task stage06-spiral-delayed-character01-normal --allow-task-transfer --transfer-reason "Frozen update 1 source comparison after update 3 spiral failure" --output runs/ppo-masked-zone24-smoke-spiral-control.jsonl
+```
+
+Start from that spell's result menu. Review the complete source batch before
+more native runs; preserve this failure and avoid repeating update 3 until a
+favorable sample appears.
+
+## Source comparison completed; switch to a distinct controller experiment
+
+`runs/ppo-masked-zone24-smoke-spiral-control.jsonl` gives update 1 two successes
+at 1119/1311 frames and one death failure at 953, with correct controller replay.
+The source therefore also has a current failure; the later 1k continuation is
+not a sufficient explanation. Its earlier spiral three-of-three result remains
+separate (five successes, one failure across both source batches). Initial PPO
+effects and original BC reliability are not isolated by these unpaired trials.
+
+Stop unchanged-controller acceptance repeats and hold PPO training. The source
+failure includes a downward proposal with predicted gap 0.60 px versus a 19.82 px
+alternative. BC/update 3 agree on that recorded proposal. A distinct, default-off
+evaluation controller now gates fresh proposals by geometric clearance; see
+[RISK_CONTROL.md](RISK_CONTROL.md) for evidence, provenance, tests and the first
+native command. Any benefit belongs to the combined controller, not PPO training.

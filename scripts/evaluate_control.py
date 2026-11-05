@@ -11,6 +11,7 @@ from env.session import GameSession, OBSERVATION_SCHEMA
 from env.windows import WindowsKeyboard, connect
 from env.frame_stepper import ACQUISITION_CONTRACT
 from agent.masked_contract import MASKED_PPO_CONTRACT
+from agent.risk_contract import RISK_PPO_CONTRACT, RISK_OBSERVATION_CONTRACT
 from scripts.diagnostics import DiagnosticLog, run_episodes, timing_clock_info
 
 
@@ -50,6 +51,8 @@ def main():
     parser.add_argument("--transfer-reason", help="Describe the task change and comparison")
     parser.add_argument("--boundary-mask", action="store_true",
                         help="Explicitly exclude directions crossing bounds during the hold")
+    parser.add_argument("--risk-filter", action="store_true",
+                        help="Experimental clearance gate for fresh choices; requires --boundary-mask")
     parser.add_argument("--output", required=True)
     parser.add_argument("--hold-frames", type=int, default=4)
     parser.add_argument("--episodes", type=int, default=1)
@@ -59,6 +62,8 @@ def main():
     if (args.episodes < 1 or not 0 < args.focus_timeout <= 60
             or not 2 <= args.hold_frames <= 16 or args.hold_frames % 2):
         parser.error("Invalid episode count, focus timeout or even hold duration (2-16)")
+    if args.risk_filter and not args.boundary_mask:
+        parser.error("--risk-filter requires --boundary-mask")
     saved = read_checkpoint(args.resume, evaluation=True)
     try:
         identity = evaluation_identity(saved, args.task, allow_task_transfer=args.allow_task_transfer,
@@ -69,8 +74,17 @@ def main():
     from env.touhou_env import TouhouEnv
 
     config = saved["config"]
-    if config.get("ppo_contract") == MASKED_PPO_CONTRACT and not args.boundary_mask:
+    if config.get("ppo_contract") in (MASKED_PPO_CONTRACT, RISK_PPO_CONTRACT) and not args.boundary_mask:
         parser.error("Masked PPO checkpoints require --boundary-mask evaluation")
+    intrinsic_risk = config.get("ppo_contract") == RISK_PPO_CONTRACT
+    if intrinsic_risk:
+        from scripts.train_masked import risk_config
+        try:
+            risk_config(saved)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if not args.risk_filter:
+            parser.error("Risk PPO checkpoints require --risk-filter evaluation")
     if config.get("decision_contract") == "attack-zone-held-v1" and args.hold_frames != config["hold_frames"]:
         parser.error("Zone-clone evaluation must keep the checkpoint hold_frames setting")
     source = Path(args.resume) / "model.zip"
@@ -88,9 +102,13 @@ def main():
             raise
         with session:
             learner = PPOBackend(TouhouEnv(session), checkpoint=str(source))
-            if config.get("ppo_contract") == MASKED_PPO_CONTRACT and getattr(
+            if config.get("ppo_contract") in (MASKED_PPO_CONTRACT, RISK_PPO_CONTRACT) and getattr(
                     learner.model.policy, "mask_hold_frames", None) != args.hold_frames:
                 raise RuntimeError("Masked checkpoint policy and hold metadata differ")
+            if intrinsic_risk:
+                from agent.risk_policy import RiskActorCriticPolicy
+                if not isinstance(learner.model.policy, RiskActorCriticPolicy):
+                    raise RuntimeError("Risk checkpoint policy class differs")
             boundary = {}
             policy_name = "ppo_action_commitment"
             collection = "control_evaluation"
@@ -104,6 +122,15 @@ def main():
                             "boundary_bounds": FIELD_BOUNDS, "boundary_speed": 2.,
                             "boundary_horizon_frames": args.hold_frames,
                             "boundary_hold_interruptions_allowed": True}
+                if args.risk_filter:
+                    from agent.risk_control import RiskBoundaryCommitment, RISK_CONTRACT, RISK_OPTIONS
+                    choose = RiskBoundaryCommitment(learner.action_logits, lambda: session.elapsed_frames,
+                                                    args.hold_frames, canonical_observation=intrinsic_risk)
+                    policy_name = "ppo_boundary_risk_action_commitment"
+                    collection = "risk_control_evaluation"
+                    boundary.update(risk_contract=RISK_CONTRACT, risk_options=RISK_OPTIONS,
+                                    risk_interrupts_hold=False,
+                                    risk_observation_contract=RISK_OBSERVATION_CONTRACT if intrinsic_risk else "native-float-v1")
             else:
                 choose = ActionCommitment(learner.deterministic_action,
                                           lambda: session.elapsed_frames, args.hold_frames)
@@ -124,8 +151,11 @@ def main():
                 print(f"Frozen task transfer: {identity['transfer_reason']}", file=sys.stderr)
             if args.boundary_mask:
                 print("Boundary-mask experiment: actor scores are filtered for hold endpoints; "
-                      "a projected crossing can interrupt a hold. No bullet or teacher override.",
+                      "a projected crossing can interrupt a hold.",
                       file=sys.stderr)
+            if args.risk_filter:
+                print("Risk-filter experiment: fresh choices use a 12-frame linear clearance gate. "
+                      "This evaluates the frozen actor plus an explicit geometric controller.", file=sys.stderr)
             print("Start from the declared evaluation spell RESULT menu and keep game focus. "
                   "This evaluates a network plus action holding, without training or a teacher.",
                   file=sys.stderr)
