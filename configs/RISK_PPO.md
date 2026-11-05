@@ -180,3 +180,55 @@ and start at its result menu:
 
 Review this control before additional training or reward/controller changes.
 Preserve the failure and the earlier reference; update 4 is not promoted.
+
+## Source control and opt-in attack return
+
+The prepared risk update-3 source control also finishes stage 1 at 2/3:
+1680-frame failure, then 1003/1025-frame successes, no recorded deaths/dying.
+The user confirms the first episode timed out while repeatedly trying right.
+Its last boss-tagged sample retains 225 HP at frame 1558, player x=364.73.
+All 1855 transitions replay exactly; the loaded source policy matches candidates
+and proposals. This demonstrates the failure exists before the risk update;
+it does not establish equal reliability or rule out update effects.
+
+`--attack-return` is a separate frozen-controller experiment, requiring both
+existing risk and boundary flags. `safe-attack-band-return-v1` uses exactly the
+existing risk candidates and physical hold checks. Outside the checkpoint's
+attack half-width, normal-safe candidates rank by horizontal progress into the
+band, vertical detour, stay, then retreat. Actor logits break ties in each group.
+Visible/collidable targets above the player are boss-first, then nearest in x/y,
+matching the feature target convention. No valid target, being inside the band,
+or emergency mode preserves the original risk proposal. Unsafe approach never
+overrides the gate; retreat remains possible if it is the only candidate.
+
+This is local ranking, not a multi-step route planner. A vertical move may allow
+later lateral recovery, but that path is not predicted. Absolute y is not
+penalized, and homing damage/HP/timers are not new inputs. Risk changes and target
+changes alone do not interrupt the four-frame hold.
+
+Logs use `attack_return_control_evaluation` and a separate policy/contract tag.
+They retain the raw, physical and original risk proposals, target dx, band
+excess, return proposal and override status; summary counts separate proposed
+changes from applied fresh choices. This externally ranked controller has not
+been trained by PPO. Do not use its actions with the intrinsic policy's saved
+sampling likelihoods or pool its results with the original controller.
+
+`runs/ppo-risk-zone24-preflight-stage01-control-analysis.json` audits the source
+and probes new rankings on its fixed observations: 198/928 fresh choices differ
+(142/35/21 by episode), all inside unchanged risk sets; emergency proposals are
+unchanged. This is not closed-loop success evidence. Seven added tests cover
+safe recovery, detours, stay/retreat fallback, emergency precedence, target
+eligibility, holds, CLI guards and fake-native provenance/source preservation.
+The full suite passes 254 tests. Console output is saved in
+`runs/attack-return-tests.console.log`.
+
+Keep training paused. Select the original stage-1 spell and keep character,
+equipment and difficulty fixed. From its result menu, evaluate the same frozen
+source weights with only this ranking change:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_control --resume runs/ppo-risk-zone24-preflight/checkpoints/update-000003 --boundary-mask --risk-filter --attack-return --hold-frames 4 --episodes 3 --task spell01-character01-normal --output runs/ppo-risk-zone24-preflight-stage01-return-eval.jsonl
+```
+
+This native experiment is pending. Inspect survival, damage and return behavior
+before old-task regressions or considering any training-distribution change.

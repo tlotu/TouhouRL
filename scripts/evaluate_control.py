@@ -53,6 +53,8 @@ def main():
                         help="Explicitly exclude directions crossing bounds during the hold")
     parser.add_argument("--risk-filter", action="store_true",
                         help="Experimental clearance gate for fresh choices; requires --boundary-mask")
+    parser.add_argument("--attack-return", action="store_true",
+                        help="Evaluation-only attack-band ranking inside risk candidates")
     parser.add_argument("--output", required=True)
     parser.add_argument("--hold-frames", type=int, default=4)
     parser.add_argument("--episodes", type=int, default=1)
@@ -64,6 +66,8 @@ def main():
         parser.error("Invalid episode count, focus timeout or even hold duration (2-16)")
     if args.risk_filter and not args.boundary_mask:
         parser.error("--risk-filter requires --boundary-mask")
+    if args.attack_return and not (args.risk_filter and args.boundary_mask):
+        parser.error("--attack-return requires --boundary-mask --risk-filter")
     saved = read_checkpoint(args.resume, evaluation=True)
     try:
         identity = evaluation_identity(saved, args.task, allow_task_transfer=args.allow_task_transfer,
@@ -131,6 +135,15 @@ def main():
                     boundary.update(risk_contract=RISK_CONTRACT, risk_options=RISK_OPTIONS,
                                     risk_interrupts_hold=False,
                                     risk_observation_contract=RISK_OBSERVATION_CONTRACT if intrinsic_risk else "native-float-v1")
+                    if args.attack_return:
+                        from agent.attack_return_control import AttackReturnCommitment, ATTACK_RETURN_CONTRACT
+                        half_width = (config.get('feature_options') or {}).get('half_width', 24.)
+                        choose = AttackReturnCommitment(learner.action_logits, lambda: session.elapsed_frames,
+                            args.hold_frames, canonical_observation=intrinsic_risk, half_width=half_width)
+                        policy_name = 'ppo_risk_attack_return_action_commitment'
+                        collection = 'attack_return_control_evaluation'
+                        boundary.update(attack_return_contract=ATTACK_RETURN_CONTRACT,
+                            attack_return_half_width=half_width, attack_return_training=False)
             else:
                 choose = ActionCommitment(learner.deterministic_action,
                                           lambda: session.elapsed_frames, args.hold_frames)
@@ -156,6 +169,9 @@ def main():
             if args.risk_filter:
                 print("Risk-filter experiment: fresh choices use a 12-frame linear clearance gate. "
                       "This evaluates the frozen actor plus an explicit geometric controller.", file=sys.stderr)
+            if args.attack_return:
+                print("Attack-return experiment: outside the attack band, rank unchanged safe candidates "
+                      "by approach, vertical detour, stay, then retreat; emergency ranking is unchanged.", file=sys.stderr)
             print("Start from the declared evaluation spell RESULT menu and keep game focus. "
                   "This evaluates a network plus action holding, without training or a teacher.",
                   file=sys.stderr)

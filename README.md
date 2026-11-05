@@ -351,7 +351,8 @@ Install optional training dependencies, then run the offline tests first:
 The two test_ppo_backend tests must run rather than skip. They check an actual
 optimizer update, GAE boundaries, and checkpoint loading. All 120 tests now pass
 with the training dependencies installed at that milestone. The current full
-suite passes 247 tests, including risk-consistent updates, optimizer restoration and risk filtering.
+suite passes 254 tests, including risk-consistent updates, optimizer restoration,
+risk filtering and opt-in safe attack-band return ranking.
 
 Select the spell manually and enter its success or failure RESULT menu. Then:
 

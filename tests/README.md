@@ -134,4 +134,8 @@ source preservation / teacher-data exclusion. The current full suite passes
 policy candidate agreement, sampled likelihoods, nonempty Adam preservation,
 actual actor updates and restored updates, configuration guards, source-preserving
 preparation, canonical evaluation and fake-native risk training diagnostics.
-The current full suite passes 247 tests.
+The current full suite passes 254 tests.
+
+`test_attack_return_control.py` covers safe attack-band recovery, vertical
+detours, emergency/target guards, unchanged holding, CLI opt-in and fake-native
+action provenance with a preserved source archive.
