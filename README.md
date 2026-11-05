@@ -19,6 +19,11 @@ The Gymnasium adapter test is skipped when Gymnasium is unavailable.
 
 ## Read-only check
 
+Candidate laser acquisition is a separate read-only experiment; see
+[configs/LASER_PROBE.md](configs/LASER_PROBE.md). It has not been added to policy
+observations or verified against native laser damage in the old policy. The
+isolated static-laser PPO smoke is documented in [configs/LASER_PPO.md](configs/LASER_PPO.md).
+
 Start the game manually, enter spell practice, and run:
 
 ```powershell
@@ -351,8 +356,8 @@ Install optional training dependencies, then run the offline tests first:
 The two test_ppo_backend tests must run rather than skip. They check an actual
 optimizer update, GAE boundaries, and checkpoint loading. All 120 tests now pass
 with the training dependencies installed at that milestone. The current full
-suite passes 254 tests, including risk-consistent updates, optimizer restoration,
-risk filtering and opt-in safe attack-band return ranking.
+suite passes 286 tests, including risk-consistent updates, optimizer restoration,
+risk filtering, safe attack-band return, laser probing and laser PPO preparation.
 
 Select the spell manually and enter its success or failure RESULT menu. Then:
 

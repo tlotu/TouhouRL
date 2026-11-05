@@ -8,6 +8,7 @@ from .training import REWARD_PROFILE
 from .held_training import HELD_REWARD_PROFILE, PPO_CONTRACT
 from .masked_contract import MASKED_PPO_CONTRACT, MASKED_REWARD_PROFILE
 from .risk_contract import RISK_PPO_CONTRACT
+from .laser_contract import LASER_PPO_CONTRACT, LASER_SCHEMA
 
 
 def create_run_directory(requested):
@@ -48,14 +49,16 @@ def read_checkpoint(path, *, evaluation=False):
     path = Path(path)
     metadata = json.loads((path / "metadata.json").read_text(encoding="utf-8"))
     allowed_rewards = ("spell-v1", REWARD_PROFILE) if evaluation else (REWARD_PROFILE,)
-    if (metadata.get("config", {}).get("ppo_contract") in (MASKED_PPO_CONTRACT, RISK_PPO_CONTRACT)
+    if (metadata.get("config", {}).get("ppo_contract") in (MASKED_PPO_CONTRACT, RISK_PPO_CONTRACT, LASER_PPO_CONTRACT)
             and metadata["config"].get("decision_contract") == "attack-zone-held-v1"):
         allowed_rewards = (*allowed_rewards, MASKED_REWARD_PROFILE)
     if (metadata.get("config", {}).get("ppo_contract") == PPO_CONTRACT
             and metadata["config"].get("decision_contract") == "attack-zone-held-v1"):
         allowed_rewards = (*allowed_rewards, HELD_REWARD_PROFILE)
+    expected_schema = (LASER_SCHEMA if metadata.get('config',{}).get('ppo_contract') == LASER_PPO_CONTRACT
+                       else OBSERVATION_SCHEMA)
     if (metadata.get("format") != 1 or metadata.get("complete") is not True
-            or metadata.get("schema") != OBSERVATION_SCHEMA
+            or metadata.get("schema") != expected_schema
             or metadata.get("reward_profile") not in allowed_rewards
             or not (path / "model.zip").is_file()):
         raise ValueError("Incomplete or incompatible training checkpoint")

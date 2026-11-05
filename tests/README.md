@@ -134,7 +134,27 @@ source preservation / teacher-data exclusion. The current full suite passes
 policy candidate agreement, sampled likelihoods, nonempty Adam preservation,
 actual actor updates and restored updates, configuration guards, source-preserving
 preparation, canonical evaluation and fake-native risk training diagnostics.
-The current full suite passes 254 tests.
+The current full suite passes 286 tests.
+
+`test_laser_room.py` covers offline warning-wall components, fading exclusion,
+blocked seeds and invalid geometry. It does not validate a live room planner.
+
+Laser evaluation also tests the optional wider safe candidate band, physical
+and emergency precedence, invalid slack and external-gate trace provenance.
+
+`test_evaluate_laser.py` checks frozen deterministic action agreement and
+fake-native trace provenance for the separate static-laser evaluator.
+
+Laser policy tests cover combined candidates and likelihoods, synthetic PPO
+updates/reload, source/Adam migration, same-frame session wrapping, task guards,
+and fake-native complete-episode training at the result menu.
+
+`test_laser_geometry.py` covers offline static segment distances, hypothetical
+phase timing, crossing trajectories and rejection of unsupported motion/phases.
+
+`test_laser_probe.py` covers candidate geometry/invalid-field preservation,
+build guards, bounded acquisition races, raw bytes, menu isolation, read-only
+CLI logging and reader cleanup. Tests do not verify native laser semantics.
 
 `test_attack_return_control.py` covers safe attack-band recovery, vertical
 detours, emergency/target guards, unchanged holding, CLI opt-in and fake-native

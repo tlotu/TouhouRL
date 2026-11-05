@@ -232,3 +232,157 @@ source weights with only this ranking change:
 
 This native experiment is pending. Inspect survival, damage and return behavior
 before old-task regressions or considering any training-distribution change.
+
+## Attack-return first native result and expansion order
+
+`runs/ppo-risk-zone24-preflight-stage01-return-eval.jsonl` completes 3/3,
+zero deaths/dying, at 1115/995/1058 frames (17.6 seconds mean to result).
+The same prepared risk update-3 archive remains frozen. All 1585 transitions
+replay exactly; loaded intrinsic risk candidates/proposals match. Fresh actions
+stay inside unchanged risk sets and modeled execution windows. Return ranking
+affects 61/793 fresh choices (24/12/25); no physical hold interrupts occur.
+Peak bullets=70, omitted=0, radius fallbacks=0, snapshot race retries=0.
+The adjacent `-analysis.json` records hashes and per-episode trajectory ranges.
+This is promising controller evidence, not a learned-weight gain, a paired
+effect estimate, or evidence that Normal learning is exhausted.
+
+Run one bounded compatibility check: three dense and three spiral episodes
+using the same frozen source and the new controller. Switch spells manually,
+keep character/equipment/difficulty fixed, and start at each result menu:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_control --resume runs/ppo-risk-zone24-preflight/checkpoints/update-000003 --boundary-mask --risk-filter --attack-return --hold-frames 4 --episodes 3 --task stage06-straight-dense-character01-normal --output runs/ppo-risk-zone24-preflight-stage06-return-eval.jsonl
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_control --resume runs/ppo-risk-zone24-preflight/checkpoints/update-000003 --boundary-mask --risk-filter --attack-return --hold-frames 4 --episodes 3 --task stage06-spiral-delayed-character01-normal --allow-task-transfer --transfer-reason "Frozen risk update 3 with attack-return ranking; spiral compatibility" --output runs/ppo-risk-zone24-preflight-spiral-return-eval.jsonl
+```
+
+If compatible, evaluate an explicitly identified Lunatic spell dominated by
+straight round bullets as an unseen frozen task before adding training budget.
+Record manual task/difficulty selection and inspect bullet omissions, emergency
+frequency, measured timing, corner recovery, death versus timeout and remaining
+boss HP. Failure can reveal representation/controller limits as well as policy
+limits. Do not increase capacity without a separately versioned compatibility
+change. Repeated easy-card evaluations are not the next training curriculum.
+
+Laser support comes later: current memory acquisition/state space/clearance
+forecast do not encode laser segments, widths or activation phases. First audit
+read-only acquisition and collision geometry, then observation/model contracts
+and offline tests, before treating laser deaths as policy evaluations. No new
+Lunatic or laser native experiment has occurred during this review.
+
+## Attack-return compatibility completed
+
+The frozen prepared risk update 3 plus attack-return controller completes dense
+3/3 at 724/841/711 frames and spiral 3/3 at 1255/1172/1075 frames, without
+recorded deaths/dying. All 2891 new transitions replay exactly and loaded risk
+policy candidates/proposals match. Fresh choices satisfy their risk sets;
+execution windows remain feasible. Return ranking affects 35/570 dense and
+69/876 spiral fresh choices, all in normal-safe mode. No physical holds interrupt
+and no snapshot race retries occur. Dense peaks at 237 bullets, omitting 109;
+spiral peaks at 258, omitting 130. Radius fallbacks remain zero.
+
+Reset signatures match the previously checked spells: dense 750 HP at (192,128),
+spiral 1600 HP at (192,96). Selection is still manual. Adjacent `-analysis.json`
+reports preserve hashes and trajectories. The separate controller registry
+`runs/ppo-risk-zone24-preflight/attack-return-evaluation.json` now records all
+three tasks at 3/3 each and current source hashes. This bounded compatibility
+check is complete; no more Normal repetitions are scheduled. These small,
+unpaired samples do not establish superiority or general difficulty mastery.
+
+Next, manually select one Lunatic spell dominated by straight round bullets,
+without lasers; prefer a corresponding version of the earlier dense spell if
+available. Keep character/equipment and all controller settings fixed. Start at
+its result menu and run three frozen episodes:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_control --resume runs/ppo-risk-zone24-preflight/checkpoints/update-000003 --boundary-mask --risk-filter --attack-return --hold-frames 4 --episodes 3 --task lunatic-straight-round-probe01-character01-lunatic --allow-task-transfer --transfer-reason "Frozen Normal reference; first Lunatic straight round-bullet probe with manual spell selection" --output runs/ppo-risk-zone24-preflight-lunatic-round-probe01.jsonl
+```
+
+`probe01` is an experimental label, not a decoded spell ID. Report the actual
+spell name or selection-screen screenshot with the logs, and retain that mapping
+before comparisons or training. Do not pool different spells under this label.
+The CLI cannot select or verify difficulty. Assess losses, remaining HP,
+omissions, emergency frequency and timing before changing capacity, hold length,
+reward or training budget. Lunatic outcomes remain pending; laser acquisition
+and geometry remain a separate unimplemented phase.
+
+## Lunatic probe 1: user-identified stage-3 spell
+
+The user identifies `lunatic-straight-round-probe01-character01-lunatic` as
+stage 3, "Dazzling Color Typhon" (spelling preserved as reported), with many
+small straight bullets emitted in different directions. This mapping is a
+manual report, not a decoded native spell ID. The actual suffixed files are
+`runs/ppo-risk-zone24-preflight-lunatic-round-probe01-001.jsonl` and its console.
+Preserve the original generic header; the adjacent analysis and controller
+registry store the task mapping.
+
+The frozen model/controller completes 3/3 at 1319/1402/1371 frames, zero
+deaths/dying, mean 22.733 seconds to result. All 2045 transitions replay exactly;
+loaded intrinsic risk candidates/proposals match (max logit error 6.68e-6).
+All execution windows and fresh risk memberships pass. Return ranking affects
+49/1023 fresh choices; risk gating affects 96. There are no emergency fresh
+choices, physical hold interruptions or snapshot race retries. Player x stays
+within approximately 144.49..310.08 across the three trajectories.
+
+Peak bullets=361, omitted=233; 1497/2045 post-step samples omit bullets. Only
+nearest 128 are encoded. Omitted geometry is unavailable for retrospective
+collision forecasts, so omission counts alone prove neither safety nor causation.
+Selected fresh-action forecast clearance has minimum 5.712 px; this is a
+12-frame linear geometric estimate, not survival probability. Frame deltas are
+2 on 2041 substeps, 1 on two, and 4 on two. Decision time p95=2.143 ms and
+observation age p95=3.061 ms (max 14.927 ms). Requested two-frame timing is not
+an exact engine lock. No retained velocity component reaches its clipping bound.
+
+End this spell's first probe. Select a different Lunatic round-bullet spell
+with a different emission mechanism, such as aimed bursts or rotating volleys
+whose individual bullets remain straight; exclude lasers for now. Keep the
+model, capacity, gate, hold and equipment frozen. Report the actual spell name
+with the results, and use a new probe label to avoid pooling tasks:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_control --resume runs/ppo-risk-zone24-preflight/checkpoints/update-000003 --boundary-mask --risk-filter --attack-return --hold-frames 4 --episodes 3 --task lunatic-round-probe02-character01-lunatic --allow-task-transfer --transfer-reason "Frozen reference; second manually identified Lunatic round-bullet spell with different emission mechanics" --output runs/ppo-risk-zone24-preflight-lunatic-round-probe02.jsonl
+```
+
+Do not relabel this checkpoint as trained on Lunatic or infer full difficulty
+mastery. No extra training, capacity change or laser implementation is made.
+
+## Lunatic probe 2: VividChaoticDance
+
+The user identifies probe 2 as stage-3 "VividChaoticDance", under the declared
+Lunatic evaluation. Preserve that spelling and the original generic task tag.
+Its detailed emission mechanism has not been supplied; do not infer it from the
+name. `runs/ppo-risk-zone24-preflight-lunatic-round-probe02.jsonl` completes
+3/3 at 1095/1154/1195 frames, no deaths/dying, mean 19.133 seconds to result.
+Resets show 1400 HP at (192,144), distinct from probe 1's 2000 HP; clear times
+across these spells are not a policy-improvement comparison.
+
+All 1723 transitions replay exactly and loaded risk candidates/proposals match
+(max logit error 3.81e-6). All fresh risk memberships and modeled execution
+windows pass. There are 862 fresh choices, including 10 emergency choices
+(3/7/0), and 74 applied return choices (14/22/38). One physical hold interrupts
+in episode 1 at frame 582: previous down-left would cross y=432 within the
+remaining two frames; the controller starts a fresh up action, which is the only
+risk candidate. No risk/return override bypasses safety or the hold contract.
+
+Peak bullets=347, omitted=219; 905 post-step samples omit bullets. No radius
+fallbacks or snapshot race retries occur. Delta frames are 2 on 1721 substeps
+and 1 on two; decision p95=2.216 ms, observation age p95=3.062 ms, max age
+12.666 ms. Fixed-state held actions lie outside newly computed risk sets on
+97 substeps, as permitted when only physical bounds interrupt holding.
+
+Two distinct Lunatic probes have now passed their first three episodes each.
+Keep their results separate; neither general difficulty mastery nor learned
+Lunatic adaptation follows. End this bounded round-bullet probe phase; do not
+schedule another arbitrary spell merely to accumulate wins. Training stays
+paused, with the existing model and controller references preserved.
+
+The next engineering phase is laser observability: choose and identify one
+laser spell, establish read-only slot/phase/width/angle/segment diagnostics on
+the validated build, verify against visible activation, and test dangerous
+geometry offline. Only then extend the observation/policy contracts and run
+control evaluations. Existing circular-bullet observations cannot establish
+laser safety. Reference-project laser utilities are clues requiring independent
+verification; no production laser reader or native laser test is implemented
+in this analysis-only step.
