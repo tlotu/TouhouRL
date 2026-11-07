@@ -1,5 +1,9 @@
 # Learning algorithms
 
+`forward_model.py` and `timed_planner.py` provide independent offline timed
+collision/reachability diagnostics and a goal-region contract. They do not alter
+the deployed BC/PPO policy. See configs/HIERARCHICAL_RESEARCH.md.
+
 `baselines.py` provides seeded random, stationary, reactive bullet avoidance,
 and `reactive_attack` policies. All use encoded observations and return action IDs
 0-8. The reactive policy predicts linear bullet motion over 12 frames and assumes

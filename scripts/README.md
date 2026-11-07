@@ -1,5 +1,10 @@
 # Entry points
 
+`python -m scripts.probe_planning` runs offline timed planning micro-cases and
+optional fresh trace states. Reports, SVGs and console output are saved under a
+numbered output directory. No game or model connection is made. See
+configs/HIERARCHICAL_RESEARCH.md for trace arguments and research stages.
+
 ## PPO
 
 `python -m scripts.train` collects complete episodes and updates SB3 PPO only in

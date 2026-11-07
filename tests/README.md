@@ -1,5 +1,9 @@
 # Offline tests
 
+`test_forward_model.py`, `test_timed_planner.py` and `test_probe_planning.py`
+check swept collision timing, warning/fade crossing, detours, goal windows,
+reference/beam reachability, returned-route replay and offline report provenance.
+
 Training checks:
 
 - `test_training.py`: Complete-episode collection, transition alignment, reward
@@ -134,7 +138,9 @@ source preservation / teacher-data exclusion. The current full suite passes
 policy candidate agreement, sampled likelihoods, nonempty Adam preservation,
 actual actor updates and restored updates, configuration guards, source-preserving
 preparation, canonical evaluation and fake-native risk training diagnostics.
-The current full suite passes 286 tests.
+The current full suite passes 311 tests. `test_short_planner.py` covers swept
+filter agreement, timed collision, boundary clipping, TTC, necessary reversals,
+closure triggers, and replay of the route selected by action smoothing.
 
 `test_laser_room.py` covers offline warning-wall components, fading exclusion,
 blocked seeds and invalid geometry. It does not validate a live room planner.

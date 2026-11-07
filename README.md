@@ -345,6 +345,8 @@ For the optional frozen-actor clearance gate, see
 Risk-consistent PPO migration and training are in [configs/RISK_PPO.md](configs/RISK_PPO.md).
 Frame-crossing acquisition recovery and interrupted-run handling are documented
 in [configs/STATE_ACQUISITION.md](configs/STATE_ACQUISITION.md).
+The offline analytic planning probe and hierarchical research stages are in
+[configs/HIERARCHICAL_RESEARCH.md](configs/HIERARCHICAL_RESEARCH.md).
 
 Install optional training dependencies, then run the offline tests first:
 
@@ -356,8 +358,9 @@ Install optional training dependencies, then run the offline tests first:
 The two test_ppo_backend tests must run rather than skip. They check an actual
 optimizer update, GAE boundaries, and checkpoint loading. All 120 tests now pass
 with the training dependencies installed at that milestone. The current full
-suite passes 286 tests, including risk-consistent updates, optimizer restoration,
-risk filtering, safe attack-band return, laser probing and laser PPO preparation.
+suite passes 311 tests, including risk-consistent updates, optimizer restoration,
+risk filtering, safe attack-band return, laser probing, laser PPO preparation,
+and offline timed planning/provenance diagnostics.
 
 Select the spell manually and enter its success or failure RESULT menu. Then:
 
