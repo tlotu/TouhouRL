@@ -1,11 +1,17 @@
 """Lazy Windows bindings for read-only process access and foreground input."""
+from contextlib import contextmanager
 import ctypes
 from ctypes import wintypes as w
 import os
 from pathlib import Path
+import time
 
 from .action_emulator import InputError
 from .memory_reader import MemoryReader, load_profile
+
+
+INPUT_TIMING_CONTRACT = "windows-sequential-input-v1"
+MULTI_KEY_INPUT_TIMING_CONTRACT = "windows-multi-key-input-v1"
 
 
 def libraries():
@@ -123,6 +129,7 @@ class Input(ctypes.Structure):
 
 
 class WindowsKeyboard:
+    _input_profile = None
     SCANS = {"up": 0x48, "down": 0x50, "left": 0x4B, "right": 0x4D,
              "z": 0x2C, "shift": 0x2A}
 
@@ -136,24 +143,74 @@ class WindowsKeyboard:
         self.user.GetAsyncKeyState.argtypes = [ctypes.c_int]
         self.user.GetAsyncKeyState.restype = ctypes.c_short
 
+    @contextmanager
+    def profile_input(self):
+        """Collect native call timings for one action dispatch."""
+        if self._input_profile is not None:
+            raise RuntimeError("Input dispatch profiling is already active")
+        profile = {"foreground_seconds": [], "events": []}
+        self._input_profile = profile
+        try:
+            yield profile
+        finally:
+            self._input_profile = None
+
     def is_foreground(self):
+        profile = self._input_profile
+        if profile is not None:
+            started = time.perf_counter()
         pid = w.DWORD()
         hwnd = self.user.GetForegroundWindow()
         self.user.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if profile is not None:
+            profile["foreground_seconds"].append(time.perf_counter() - started)
         return pid.value == self.pid
 
-    def _send(self, key, up):
-        if not up and not self.is_foreground():
-            raise InputError("Game window is not in the foreground")
+    def _input_event(self, key, up):
         event = Input()
         event.type = 1
         event.value.keyboard.scan = self.SCANS[key]
         event.value.keyboard.flags = 8 | (2 if up else 0) | (1 if key in ("up", "down", "left", "right") else 0)
-        if self.user.SendInput(1, ctypes.byref(event), ctypes.sizeof(event)) != 1:
+        return event
+
+    def _send(self, key, up):
+        if not up and not self.is_foreground():
+            raise InputError("Game window is not in the foreground")
+        profile = self._input_profile
+        if profile is not None:
+            started = time.perf_counter()
+        event = self._input_event(key, up)
+        pointer, size = ctypes.byref(event), ctypes.sizeof(event)
+        if profile is not None:
+            prepared = time.perf_counter()
+        sent = self.user.SendInput(1, pointer, size)
+        if profile is not None:
+            returned = time.perf_counter()
+            profile["events"].append({"key": key, "down": not up, "prepare_seconds": prepared - started,
+                                      "send_input_seconds": returned - prepared})
+        if sent != 1:
             raise InputError("SendInput failed; check process privilege levels")
 
     def key_down(self, key):
         self._send(key, False)
+
+    def send_batch(self, changes):
+        if not changes:
+            return 0
+        if not self.is_foreground():
+            raise InputError("Game window is not in the foreground")
+        profile = self._input_profile
+        if profile is not None:
+            started = time.perf_counter()
+        events = (Input * len(changes))(*(self._input_event(key, not down) for key, down in changes))
+        if profile is not None:
+            prepared = time.perf_counter()
+        sent = self.user.SendInput(len(changes), events, ctypes.sizeof(Input))
+        if profile is not None:
+            returned = time.perf_counter()
+            profile["events"].extend({"key": key, "down": down} for key, down in changes)
+            profile["batch"] = {"prepare_seconds": prepared - started, "send_input_seconds": returned - prepared}
+        return sent
 
     def shift_state(self):
         # OS high bits describe key state, not the game's consumed input.

@@ -27,7 +27,7 @@ def forecast_static_lasers(player, lasers, horizon=12, player_radius=1.25):
     """Integer-frame capsule clearance, capped at 24; static axes assumed."""
     if not 0 < horizon <= 60 or player_radius < 0:
         raise ValueError('Invalid forecast settings')
-    prepared=[]
+    active=[[] for _ in range(horizon+1)]
     for laser in lasers:
         if laser['issues'] or laser['speed'] != 0 or laser['segment_candidate'] is None:
             raise ValueError('Invalid or moving laser')
@@ -36,17 +36,25 @@ def forecast_static_lasers(player, lasers, horizon=12, player_radius=1.25):
         (ax,ay),(bx,by)=laser['segment_candidate']
         if not all(math.isfinite(v) for v in (ax,ay,bx,by,laser['width'])) or laser['width'] < 0:
             raise ValueError('Invalid laser geometry')
-        prepared.append((laser,ax,ay,bx,by))
+        phase,timer=laser['phase_raw'],laser['timer_raw']
+        if phase==2:
+            continue
+        firing=laser['firing_frames_raw']
+        on=max(0,laser['warning_frames_raw']-timer) if phase==0 else 0
+        off=on+firing if phase==0 else max(0,firing-timer)
+        beam=(ax,ay,bx,by,laser['width']/2)
+        for frame in range(math.ceil(on),min(math.ceil(off),horizon+1)):
+            active[frame].append(beam)
+    active=[(frame,beams) for frame,beams in enumerate(active) if beams]
     results=[]
     for keys in DIRECTIONS:
         dx=int('right' in keys)-int('left' in keys)
         dy=int('down' in keys)-int('up' in keys)
         scale=2/max(1.,math.hypot(dx,dy))
         gap=24.
-        for frame in range(horizon+1):
+        for frame,beams in active:
             px,py=player[0]+frame*dx*scale,player[1]+frame*dy*scale
-            for laser,ax,ay,bx,by in prepared:
-                if candidate_active(laser,frame):
-                    gap=min(gap,point_segment_distance(px,py,ax,ay,bx,by)-laser['width']/2-player_radius)
+            for ax,ay,bx,by,half_width in beams:
+                gap=min(gap,point_segment_distance(px,py,ax,ay,bx,by)-half_width-player_radius)
         results.append(gap)
     return results

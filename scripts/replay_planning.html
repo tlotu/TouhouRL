@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TouhouRL Decision Replay</title>
+<style>
+:root {color-scheme:dark; font:15px system-ui,sans-serif; color:#e6ecf4; background:#10151d}
+body {max-width:1150px; margin:32px auto; padding:0 18px}
+h1 {font-size:26px; margin:0 0 8px} h2 {font-size:15px; margin:0 0 12px}
+p {color:#acb9cb} select,input,button {font:inherit} button,select {background:#233146;color:inherit;border:1px solid #445773;border-radius:6px;padding:7px 11px}
+button:focus-visible, select:focus-visible,input:focus-visible {outline:2px solid #76c5ff}
+select {max-width:100%; margin:6px 0 14px; width:100%}
+.layout {display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.63fr);gap:16px}
+.panel {border:1px solid #314158;background:#192332;padding:14px;border-radius:9px}
+canvas {display:block;width:100%;height:auto;background:#111925;border-radius:4px}
+.controls {display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
+input[type=range] {flex:1;min-width:90px} output {font-variant-numeric:tabular-nums}
+.grid {display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.card {padding:7px 4px;text-align:center;border:1px solid #41506a;border-radius:5px;background:#233146}
+.card.clear {border-color:#5a9b91} .card.collision {background:#422c36} .card.boundary {opacity:.65}
+.card.selected {outline:2px solid #85e5a7} .card strong {font-size:21px} .card small {display:block;line-height:1.5}
+dl {display:grid;grid-template-columns:auto 1fr;gap:6px 12px;margin:0 0 16px} dt {color:#acb9cb} dd {margin:0;font-variant-numeric:tabular-nums}
+table {border-collapse:collapse;width:100%;font-size:12px;margin-top:9px} th,td {text-align:left;padding:4px;border-bottom:1px solid #354258}
+.muted {font-size:12px;color:#aebbcf;line-height:1.5} .legend {margin:.6em 0 0}
+@media(max-width:780px){.layout{grid-template-columns:1fr}body{margin-top:18px}}
+</style>
+<body>
+<h1>TouhouRL Decision Replay</h1>
+<p id="source" role="status">Replay data is not loaded. Open the generated replay.html in a browser with JavaScript enabled.</p>
+<label for="track">Scenario and controller</label>
+<select id="track" disabled></select>
+<div class="layout">
+  <section class="panel">
+    <canvas id="field" width="640" height="520" aria-label="Game state, hazards and planned route"></canvas>
+    <div class="controls">
+      <button id="previous" aria-label="Previous decision" disabled>←</button><button id="play" disabled>Play</button>
+      <button id="next" aria-label="Next decision" disabled>→</button>
+      <input type="range" id="seek" min="0" max="0" value="0" aria-label="Decision index" disabled><output id="frame"></output>
+    </div>
+    <p class="muted legend">Green marks the planned route, blue the active subgoal, amber the final goal, and red the active hazards. Space plays or pauses. Arrow keys step.</p>
+    <p class="muted" id="trace-legend" hidden>Purple marks the movement sampled from the game during the recorded hold. Switching planners keeps the same recorded decision selected.</p>
+    <p class="muted" id="branch-legend" hidden>Cyan marks this branch's motion during the hold. The original action is shown for reference. Switching branches keeps the selected time where available.</p>
+  </section>
+  <section class="panel">
+    <h2>Current decision</h2>
+    <dl id="summary"></dl>
+    <h2>Nine directions</h2><div class="grid" id="directions"></div>
+    <p class="muted">TTC is predicted time to contact while stationary after the four-frame move, capped at 60 frames. A dash marks an unavailable prediction. Probability, when present, comes from the policy.</p>
+    <h2>Search layers</h2><table><thead><tr><th>Frame</th><th>Checked</th><th>Safe</th><th>Retained first actions</th></tr></thead><tbody id="layers"></tbody></table>
+  </section>
+</div>
+<script id="data" type="application/json">__REPLAY_DATA__</script>
+<script>
+const byId = id => document.getElementById(id);
+function loadTracks() {
+  const data = byId('data').textContent.trim();
+  if (data.startsWith('__REPLAY_')) {
+    byId('source').textContent = 'This is the replay template. Open the generated replay.html in an experiment output folder under runs/.';
+    return [];
+  }
+  try {
+    const loaded = JSON.parse(data);
+    if (Array.isArray(loaded) && loaded.length && loaded.every(track => track?.frames?.length)) return loaded;
+  } catch {
+    // Keep playback disabled when embedded data cannot be read.
+  }
+  byId('source').textContent = 'Replay data is missing or invalid. Export the experiment report again.';
+  return [];
+}
+const tracks = loadTracks();
+const select = byId('track'), seek = byId('seek'), play = byId('play');
+const field = byId('field'), ctx = field.getContext('2d');
+const arrows = ['·','↑','↗','→','↘','↓','↙','←','↖'];
+const stopText = {horizon:'Horizon complete',time_limit:'Time budget reached',edge_limit:'Edge budget reached',no_safe_extension:'All extensions blocked by collision or bounds',unsafe_start:'Start intersects a predicted hazard'};
+let timer = null;
+for (const [index, track] of tracks.entries()) select.add(new Option(track.label, index));
+function current() { return tracks[Number(select.value)]; }
+function pause() { clearInterval(timer); timer = null; play.textContent = 'Play'; }
+function step(delta) {seek.value = Math.max(0, Math.min(Number(seek.max), Number(seek.value) + delta)); render();}
+function toggle() {
+  if (timer !== null) {pause(); return;}
+  if (Number(seek.max) === 0) return;
+  if (seek.value === seek.max) {seek.value = 0; render();}
+  play.textContent = 'Pause';
+  timer = setInterval(() => {step(1); if (seek.value === seek.max) pause();}, 360);
+}
+function node(tag,text) {const element = document.createElement(tag); element.textContent = text; return element;}
+function number(value) {return value == null ? '—' : Number(value).toFixed(1);}
+function action(value) {return value == null ? '—' : `${arrows[value]} (${value})`;}
+function draw(track, frame) {
+  const scene = frame.scene ?? track.scene, [xmin,xmax,ymin,ymax] = scene.bounds;
+  const time = frame.scene ? 0 : frame.frame;
+  const scale = Math.min((field.width-40)/(xmax-xmin),(field.height-40)/(ymax-ymin));
+  const x = value => (field.width-(xmax-xmin)*scale)/2+(value-xmin)*scale;
+  const y = value => (field.height-(ymax-ymin)*scale)/2+(value-ymin)*scale;
+  function circle(px,py,r,fill,stroke) {
+    ctx.beginPath();ctx.arc(x(px),y(py),Math.max(2,r*scale),0,2*Math.PI);
+    if(fill){ctx.fillStyle=fill;ctx.fill();}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke();}
+  }
+  function line(points,color,width) {
+    if (!points.length) return;
+    ctx.beginPath();points.forEach(([px,py],i)=>i ? ctx.lineTo(x(px),y(py)) : ctx.moveTo(x(px),y(py)));
+    ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap='round';ctx.stroke();
+  }
+  ctx.clearRect(0,0,field.width,field.height);
+  ctx.strokeStyle='#68809e';ctx.lineWidth=1;ctx.strokeRect(x(xmin),y(ymin),(xmax-xmin)*scale,(ymax-ymin)*scale);
+  ctx.save();ctx.beginPath();ctx.rect(x(xmin),y(ymin),(xmax-xmin)*scale,(ymax-ymin)*scale);ctx.clip();
+  for (const laser of scene.lasers) {
+    if (time >= laser.off) continue;
+    const active = time >= laser.on;
+    line([[laser.ax,laser.ay],[laser.bx,laser.by]],active?'#d35d65':'#b58a54',active?Math.max(2,laser.width*scale):2);
+  }
+  for (const c of scene.circles) circle(c.x+c.vx*time,c.y+c.vy*time,c.radius,'#e78286');
+  for (const d of frame.directions) line([frame.player,d.endpoint],d.status==='clear'?'#577d91':'#794853',1);
+  if(track.goal) circle(track.goal.x,track.goal.y,track.goal.radius,null,'#ffc86e');
+  if(frame.goal) circle(frame.goal.x,frame.goal.y,frame.goal.radius,null,'#7bc9fc');
+  line(frame.route_points,'#85e5a7',3);
+  if(frame.recorded_path) line(frame.recorded_path,'#bda7f5',3);
+  if(frame.branch_path) line(frame.branch_path,'#52d5e3',3);
+  if(frame.action != null) line([frame.player,frame.directions[frame.action].endpoint],'#f6fff8',2);
+  circle(...frame.player,scene.player_radius,'#e4f0ff');ctx.restore();
+}
+function render() {
+  const track=current(), f=track.frames[Number(seek.value)];
+  byId('previous').disabled = Number(seek.value) === 0;
+  byId('next').disabled = Number(seek.value) === Number(seek.max);
+  byId('source').textContent = [track.source,track.outcome].filter(Boolean).join(' · ');
+  byId('frame').textContent=`Frame ${(track.frame_offset||0)+f.frame} · ${Number(seek.value)+1}/${track.frames.length}`;
+  const rows = [[track.counterfactual_window ? 'Branch action' : track.trace_window ? 'Offline suggested action' : 'Controller action',action(f.action)],
+    ['Planner proposal',action(f.proposed)],
+    ['Stop reason',stopText[f.stop_reason]||f.stop_reason||'Policy decision'],['Checked edges',f.checked_edges??'—'],['Leaf TTC',number(f.leaf_ttc)]];
+  if (f.recorded_action != null) rows.push(['Recorded game action',action(f.recorded_action)]);
+  if (track.trace_window) rows.push(['Recorded move forecast',f.directions[f.recorded_action].status],
+    ['Checked / requested frames',`${f.safe_frames} / ${f.horizon}`],
+    ['Warning / active lasers',`${f.warning_lasers} / ${f.active_lasers}`],
+    ['First light in frames',number(f.first_light)],['Exit slack in frames',number(f.exit_slack)],
+    ['Encoded / omitted circles',`${f.scene.circles.length} / ${f.dropped_circles ?? '—'}`],
+    ['Planner time in ms',number(f.planner_ms)]);
+  if (f.death_observed != null) rows.push(['Recorded death first observed',`Frame ${f.death_observed}`]);
+  if (track.counterfactual_window) rows.push(['Decision source',f.decision_source],
+    ['Planner time in ms',number(f.planner_ms)],
+    ['Encoded / omitted circles',`${f.scene.circles.length} / ${f.dropped_circles ?? '—'}`]);
+  if (f.branch_event) rows.push(['Branch event',f.branch_event]);
+  if (f.manager_action != null) rows.push(['Manager option',['Upper lane','Lower lane','Destination'][f.manager_action]]);
+  byId('summary').replaceChildren(...rows.flatMap(([k,v])=>[node('dt',k),node('dd',v)]));
+  byId('directions').replaceChildren(...[8,1,2,7,0,3,6,5,4].map(a=>{
+    const d=f.directions[a], card=node('div','');
+    card.className=`card ${d.status}${a===f.action?' selected':''}`;
+    card.append(node('strong',arrows[a]),node('small',d.status),node('small',`TTC ${number(d.ttc_after_hold)}`));
+    if (f.probabilities) card.append(node('small',`${(100*f.probabilities[a]).toFixed(1)}%`));
+    return card;
+  }));
+  byId('layers').replaceChildren(...f.layers.map(l=>{
+    const row=node('tr','');row.append(...[l.frame,l.edges,l.safe_edges,l.retained.map(a=>arrows[a]).join(' ')||'—'].map(v=>node('td',v)));return row;
+  }));
+  draw(track,f);
+}
+let previousTrack;
+function reset() {
+  pause();
+  const track = current();
+  byId('trace-legend').hidden = !track.trace_window;
+  byId('branch-legend').hidden = !track.counterfactual_window;
+  const window = track.trace_window ?? track.counterfactual_window;
+  const sameWindow = window && window === (previousTrack?.trace_window ?? previousTrack?.counterfactual_window);
+  seek.max=track.frames.length-1;
+  seek.value=sameWindow ? Math.min(Number(seek.value), Number(seek.max)) : 0;
+  previousTrack=track;
+  play.disabled=seek.disabled=Number(seek.max)===0;
+  render();
+}
+if (tracks.length) {
+  select.disabled = false;
+  select.addEventListener('change',reset);seek.addEventListener('input',()=>{pause();render();});
+  play.addEventListener('click',toggle);
+  byId('previous').addEventListener('click',()=>{pause();step(-1);});
+  byId('next').addEventListener('click',()=>{pause();step(1);});
+  document.addEventListener('keydown',event=>{
+    if(['SELECT','INPUT'].includes(event.target.tagName)) return;
+    if(event.code==='Space'){event.preventDefault();toggle();}
+    if(['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();pause();step(event.key==='ArrowLeft'?-1:1);}
+  });
+  const detour=tracks.findIndex(t=>t.label==='detour_before_approach / static_guided_ttc');
+  if(detour>=0)select.value=detour;
+  reset();
+}
+</script>

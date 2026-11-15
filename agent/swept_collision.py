@@ -92,27 +92,45 @@ class SweptCollision(ForwardModel):
         valid[indices] = gaps[indices] > 0
         return valid, gaps
 
-    def stationary_ttc(self, points, frame, horizon):
-        """Capped time to first contact if each leaf waits at its position."""
+    def stationary_ttc(self, points, frame, horizon, *, warnings_only=False):
+        """Capped time to contact at rest, optionally from future laser activations."""
         points, _ = _edge_arrays(points, points, frame, horizon)
         center, circle_boxes, lasers, laser_boxes = self._layer(frame, horizon)
         ttc = np.full(len(points), horizon, dtype=float)
-        row, circle = _overlap_pairs(points, points, circle_boxes)
-        if len(row):
-            delta = center[circle] - points[row]
-            velocity = self.circles[circle, 2:4]
-            a = np.sum(velocity ** 2, axis=1)
-            b = np.sum(delta * velocity, axis=1)
-            c = np.sum(delta ** 2, axis=1) - self._radii[circle] ** 2
-            discriminant = b ** 2 - a * c
-            hit = (a > 0) & (b < 0) & (discriminant >= 0)
-            # Stable form of the smaller quadratic root for an approaching circle.
-            denominator = np.where(hit, -b + np.sqrt(np.maximum(discriminant, 0.)), 1.)
-            time = np.where(c <= 0, 0., np.where(hit, c / denominator, horizon))
-            np.minimum.at(ttc, row, time)
+        if not warnings_only:
+            row, circle = _overlap_pairs(points, points, circle_boxes)
+            if len(row):
+                delta = center[circle] - points[row]
+                velocity = self.circles[circle, 2:4]
+                a = np.sum(velocity ** 2, axis=1)
+                b = np.sum(delta * velocity, axis=1)
+                c = np.sum(delta ** 2, axis=1) - self._radii[circle] ** 2
+                discriminant = b ** 2 - a * c
+                hit = (a > 0) & (b < 0) & (discriminant >= 0)
+                # Stable form of the smaller quadratic root for an approaching circle.
+                denominator = np.where(hit, -b + np.sqrt(np.maximum(discriminant, 0.)), 1.)
+                time = np.where(c <= 0, 0., np.where(hit, c / denominator, horizon))
+                np.minimum.at(ttc, row, time)
         row, laser = _overlap_pairs(points, points, laser_boxes)
         if len(row):
             beams = lasers[laser]
             hit = _point_segment(points[row], beams[:, :2], beams[:, 2:4]) <= beams[:, 4]
+            if warnings_only:
+                hit &= beams[:, 5] > frame
             np.minimum.at(ttc, row[hit], np.maximum(0., beams[hit, 5] - frame))
         return ttc
+
+    def snapshot_edges(self, starts, ends, frame):
+        """Check spatial segments against hazard shapes at one instant."""
+        center, circles, lasers, beams = self._layer(frame, 0)
+        valid = np.ones(len(starts), dtype=bool)
+        edge, circle = _overlap_pairs(starts, ends, circles)
+        if len(edge):
+            hit = _point_segment(center[circle], starts[edge], ends[edge]) <= self._radii[circle]
+            valid[edge[hit]] = False
+        edge, laser = _overlap_pairs(starts, ends, beams)
+        if len(edge):
+            rows = lasers[laser]
+            hit = _segment_distance(starts[edge], ends[edge], rows[:, :2], rows[:, 2:4]) <= rows[:, 4]
+            valid[edge[hit]] = False
+        return valid

@@ -5,6 +5,8 @@ import struct
 from .memory_reader import MemoryReadError
 
 BASELINE_BUILD = "b0cc28ec904e9efce2439ad857c938b5"
+# Observed in the sequential and batched single-frame probes for this build.
+DIRECTION_MASKS = (0, 16, 144, 128, 160, 32, 96, 64, 80)
 
 
 class MovementProbe:
@@ -13,6 +15,18 @@ class MovementProbe:
         if build != BASELINE_BUILD or reader.addresses.get("PLAYER_BASE") != 0x4FF3A0:
             raise ValueError("Movement candidates are available only for the baseline build")
         self.reader = reader
+
+    def direction(self, expected_frame):
+        """Read the same-frame candidate direction for the supported build."""
+        try:
+            if self.reader.frame() != expected_frame:
+                return None
+            mask = struct.unpack("<H", self.reader._read(0xA6EC60, 2))[0] & 0xF0
+            if self.reader.frame() == expected_frame and mask in DIRECTION_MASKS:
+                return DIRECTION_MASKS.index(mask)
+        except MemoryReadError:
+            return None
+        return None
 
     def capture(self, expected_frame):
         record = {"verified": False, "source": "reference movement candidates"}

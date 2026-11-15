@@ -63,8 +63,12 @@ class Scene:
 
 def _point_segment(p, a, b):
     d = b - a
-    projection = np.sum((p - a) * d, axis=-1) / np.maximum(np.sum(d * d, axis=-1), 1e-30)
-    return np.linalg.norm(p - (a + np.clip(projection, 0, 1)[..., None] * d), axis=-1)
+    relative = p - a
+    dx, dy = d[..., 0], d[..., 1]
+    rx, ry = relative[..., 0], relative[..., 1]
+    projection = np.clip((rx * dx + ry * dy) / np.maximum(dx * dx + dy * dy, 1e-30), 0, 1)
+    x, y = rx - projection * dx, ry - projection * dy
+    return np.sqrt(x * x + y * y)
 
 
 def _cross(a, b):
@@ -159,9 +163,10 @@ def scene_from_observation(observation):
     point = ((float(player[0]) + 1.) * 192, (float(player[1]) + 1.) * 224)
     circles, beams = [], []
     present = bullets[bullets[:, 6] == 1]
+    absolute = np.abs(present[:, :4])
+    if np.any(absolute > 1):
+        raise ValueError("Bullet outside normalized observation range")
     for row in present:
-        if np.any(np.abs(row[:4]) > 1):
-            raise ValueError("Bullet outside normalized observation range")
         circles.append(Circle(point[0] + float(row[0]) * 384, point[1] + float(row[1]) * 448,
                               float(row[2]) * 16, float(row[3]) * 16, float(row[4]) * 32))
     for row in lasers[lasers[:, 11] == 1]:
@@ -177,6 +182,6 @@ def scene_from_observation(observation):
         beams.append(TimedLaser(*map(float, row[:5]), on, off))
     return Scene(point, tuple(circles), tuple(beams)), {
         "encoded_circles": len(circles), "encoded_lasers": int(lasers[:, 11].sum()),
-        "saturated_circle_rows": int(np.any(np.abs(present[:, :4]) >= 1, axis=1).sum()),
+        "saturated_circle_rows": int(np.any(absolute >= 1, axis=1).sum()),
         "future_births_modeled": False, "native_collision_guarantee": False,
         "geometry_source": "float32 policy observation; omitted objects are unavailable"}

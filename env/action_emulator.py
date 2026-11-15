@@ -15,11 +15,13 @@ class InputError(RuntimeError):
 class ActionEmulator:
     """keyboard provides is_foreground(), key_down(), and key_up()."""
 
-    def __init__(self, keyboard, shoot=True, slow=True):
+    def __init__(self, keyboard, shoot=True, slow=True, *, profile_input=False, batch_multi_key=False):
         self.keyboard = keyboard
         self.shoot = shoot
         self.slow = slow
         self.held = set()
+        self.profile_input = profile_input
+        self.batch_multi_key = batch_multi_key
 
     def check_focus(self):
         if not self.keyboard.is_foreground():
@@ -38,27 +40,61 @@ class ActionEmulator:
             sleep(0.05)
         raise InputError("Timed out waiting for the game window to gain focus")
 
-    def apply(self, action):
+    def _wanted_keys(self, action):
         action = operator.index(action)
         if not 0 <= action < len(DIRECTIONS):
             raise ValueError("Action must be an integer from 0 to 8")
-        self.check_focus()
         wanted = set(DIRECTIONS[action])
         if self.shoot:
             wanted.add("z")
         if self.slow:
             wanted.add("shift")
+        return wanted
+
+    def apply(self, action):
+        if self.profile_input:
+            with self.keyboard.profile_input() as timing:
+                self._apply(action)
+            return timing
+        self._apply(action)
+
+    def _apply(self, action):
+        wanted = self._wanted_keys(action)
+        self.check_focus()
         try:
-            for key in sorted(self.held - wanted):
+            releases = sorted(self.held - wanted)
+            presses = sorted(wanted - self.held)
+            if (self.batch_multi_key and len(releases) + len(presses) > 1
+                    and {"shift", "z"}.isdisjoint(releases + presses)):
+                self._send_batch(wanted, releases, presses)
+                return
+            for key in releases:
                 self.keyboard.key_up(key)
                 self.held.remove(key)
-            for key in sorted(wanted - self.held):
+            for key in presses:
                 self.check_focus()
                 self.held.add(key)
                 self.keyboard.key_down(key)
         except BaseException:
             self.release_all()
             raise
+
+    def _send_batch(self, wanted, releases, presses):
+        """Update ownership so the caller can release keys after partial submission."""
+        changes = [(key, False) for key in releases] + [(key, True) for key in presses]
+        try:
+            sent = self.keyboard.send_batch(changes)
+        except InputError:
+            # The native sender checks focus before submitting any events.
+            raise
+        except BaseException:
+            self.held.update(wanted)
+            raise
+        if sent != len(changes):
+            if sent:
+                self.held.update(wanted)
+            raise InputError(f"SendInput accepted {sent} of {len(changes)} events")
+        self.held = wanted
 
     def release_all(self):
         errors = []

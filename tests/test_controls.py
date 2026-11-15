@@ -58,6 +58,16 @@ class ControlsTests(unittest.TestCase):
         self.controls.release_all()
         self.assertFalse(self.controls.held)
 
+    def test_partial_multi_key_switch_releases_all_potentially_owned_keys(self):
+        controls = ActionEmulator(self.keyboard, batch_multi_key=True)
+        controls.apply(6)
+        self.keyboard.events.clear()
+        self.keyboard.send_batch = lambda changes: 2
+        with self.assertRaisesRegex(InputError, "accepted 2 of 4"):
+            controls.apply(2)
+        self.assertEqual(self.keyboard.events, [("up", key) for key in ("down", "left", "right", "shift", "up", "z")])
+        self.assertFalse(controls.held)
+
     def stepper(self, reader):
         return FrameStepper(reader, self.controls, clock=self.clock, sleep=self.clock.sleep)
 

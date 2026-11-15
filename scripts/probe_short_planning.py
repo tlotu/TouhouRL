@@ -9,11 +9,13 @@ import numpy as np
 
 from agent.forward_model import Circle, ForwardModel, Scene, TimedLaser
 from agent.planning_cases import micro_cases
+from agent.replay_data import decision_record
 from agent.short_planner import (
     EXIT_DELAY, EXIT_SLACK, HOLD, LONG_HORIZON, SHORT_HORIZON, SMOOTH_TOLERANCE,
-    TTC_HORIZON, TTC_WEIGHT, TURN_WEIGHT, VECTORS, plan, route_points,
+    TTC_HORIZON, TTC_WEIGHT, TURN_WEIGHT, VECTORS, SearchBudget, plan, route_points,
 )
 from agent.swept_collision import SweptCollision
+from agent.static_guidance import relative_goal, static_waypoints
 from agent.timed_planner import TimedGoal
 from scripts.probe_planning import trace_cases
 
@@ -22,6 +24,13 @@ MODES = {
     'short_clearance': {'ttc_weight': 0.},
     'short_ttc': {},
     'adaptive_ttc': {'adaptive': True},
+}
+
+BUDGET_MODES = {
+    'spatial_ttc': {'cell_size': 8.},
+    'wide_ttc': {'width': 48},
+    'budgeted_short_ttc': {'budget': SearchBudget(378, 5.)},
+    'budgeted_adaptive_ttc': {'adaptive': True, 'budget': SearchBudget(900, 8.)},
 }
 
 
@@ -52,8 +61,9 @@ def _verify(scene, route):
     points = route_points(scene, route)
     valid = np.allclose(points[-1], route.point, rtol=0, atol=1e-9)
     reference = ForwardModel(scene)
+    duration = 1 if route.motion else HOLD
     for index, (start, end) in enumerate(zip(points, points[1:])):
-        allowed, _ = reference.edges([start], [end], index * HOLD, HOLD)
+        allowed, _ = reference.edges([start], [end], index * duration, duration)
         valid &= bool(allowed[0])
     if not valid:
         raise AssertionError('Returned route failed reference replay')
@@ -67,24 +77,56 @@ def _advance(scene, player):
     return replace(scene, player=tuple(map(float, player)), circles=circles, lasers=lasers)
 
 
-def _rollout(case, settings):
+def _search_details(result):
+    return {'stop_reason': result.stop_reason, 'checked_edges': result.checked_edges,
+            'proposed_first_action': result.proposed.actions[0] if result.proposed else None,
+            'selected_first_action': result.selected.actions[0] if result.selected else None,
+            'ttc_evaluated': result.ttc_evaluated, 'layers': [asdict(layer) for layer in result.layers],
+            'candidates': [asdict(route) for route in result.candidates]}
+
+
+def _compare_coverage(search, reference_actions):
+    layer = next((layer for layer in search['layers'] if layer['frame'] == SHORT_HORIZON), None)
+    retained = set(layer['retained']) if layer else set()
+    reference = set(reference_actions)
+    if retained - reference:
+        raise AssertionError('Beam produced a first action outside the unpruned reference')
+    return {'evaluated_16_layer': layer is not None, 'reference_first_actions': sorted(reference),
+            'retained_first_actions': sorted(retained), 'missing_first_actions': sorted(reference - retained)}
+
+
+def _reference_actions(case):
+    previous = case.get('metadata', {}).get('prior_action') or 0
+    result = plan(case['scene'], case.get('goal'), previous_action=previous, width=None, ttc_weight=0.)
+    return result.first_actions_at(SHORT_HORIZON)
+
+
+def _rollout(case, settings, *, guide_static=False):
     scene, goal = case['scene'], case.get('goal')
+    started = time.perf_counter()
+    waypoints = static_waypoints(scene, goal) if guide_static else ()
+    guide_ms = (time.perf_counter() - started) * 1000 if guide_static else None
+    waypoint = 0
     arrived = 0 if goal is not None and goal.reached(scene.player, 0) else None
     frame, previous = 0, 0
     seconds, decisions = [], []
     stop_reason = 'completed'
     while frame < case['horizon']:
-        relative_goal = None
-        if goal is not None and arrived is None and frame <= goal.deadline:
-            relative_goal = replace(goal, earliest=max(0, goal.earliest - frame), deadline=goal.deadline - frame)
+        while waypoint < len(waypoints) and waypoints[waypoint].reached(scene.player, frame):
+            waypoint += 1
+        target = waypoints[waypoint] if waypoint < len(waypoints) else goal
+        target = relative_goal(target, frame) if arrived is None else None
         start = time.perf_counter()
-        result = plan(scene, relative_goal, previous_action=previous, **settings)
+        result = plan(scene, target, previous_action=previous, **settings)
         seconds.append(time.perf_counter() - start)
         route = result.selected
         decisions.append({'frame': frame, 'horizon': result.horizon,
                           'hint': asdict(result.hint) if result.hint else None,
                           'route': list(route.actions) if route else None, 'smoothed': result.smoothed,
-                          'leaf_ttc': route.ttc if route and settings.get('ttc_weight', TTC_WEIGHT) else None})
+                          'leaf_ttc': route.ttc if route and result.ttc_evaluated else None,
+                          'search': _search_details(result),
+                          'replay': decision_record(scene, frame, target, result=result,
+                                                    action=route.actions[0] if route else None)})
         if route is None:
             stop_reason = 'no_valid_action'
             break
@@ -97,7 +139,8 @@ def _rollout(case, settings):
     objective_met = goal is None or (arrived is not None) == case['expect_arrival']
     return {'pass': frame == case['horizon'] and objective_met, 'completed_frames': frame,
             'goal_arrival_frame': arrived, 'objective_met': objective_met, 'stop_reason': stop_reason,
-            'decisions': decisions, 'timing': _timings(seconds)}
+            'decisions': decisions, 'timing': _timings(seconds), 'guide_ms': guide_ms,
+            'waypoints': [asdict(point) for point in waypoints]}
 
 
 def _audit_collision(scene):
@@ -130,24 +173,31 @@ def _audit_collision(scene):
 def _snapshot(case, settings, repeats):
     scene = case['scene']
     previous = case['metadata'].get('prior_action') or 0
-    seconds = []
+    seconds, attempts = [], []
     for _ in range(repeats):
         start = time.perf_counter()
         result = plan(scene, previous_action=previous, **settings)
         seconds.append(time.perf_counter() - start)
-    route = result.selected
-    frames = 0 if route is None else len(route.actions) * HOLD
-    if route is not None:
-        _verify(scene, route)
-    return {'pass': frames >= SHORT_HORIZON, 'complete_requested_horizon': frames == result.horizon,
+        route = result.selected
+        frames = 0 if route is None else len(route.actions) * HOLD
+        if route is not None:
+            _verify(scene, route)
+        attempts.append({'elapsed_ms': seconds[-1] * 1000, 'stop_reason': result.stop_reason,
+                         'safe_prefix_frames': frames, 'checked_edges': result.checked_edges,
+                         'first_actions_16': result.first_actions_at(SHORT_HORIZON)})
+    return {'pass': all(a['safe_prefix_frames'] >= SHORT_HORIZON for a in attempts),
+            'complete_requested_horizon': all(a['safe_prefix_frames'] == result.horizon for a in attempts),
             'safe_prefix_frames': frames, 'requested_horizon': result.horizon,
             'exit_hint': asdict(result.hint) if result.hint else None,
             'previous_action': previous, 'smoothed': result.smoothed,
             'actions': list(route.actions) if route else [],
-            'leaf_ttc': route.ttc if route and settings.get('ttc_weight', TTC_WEIGHT) else None,
+            'leaf_ttc': route.ttc if route and result.ttc_evaluated else None,
             'clearance': route.clearance if route else None,
             'turn_degrees': float(np.degrees(route.turn)) if route else None,
-            'collision_counts': asdict(result.counts), 'timing': _timings(seconds)}
+            'collision_counts': asdict(result.counts), 'timing': _timings(seconds),
+            'search': _search_details(result), 'attempts': attempts,
+            'replay': decision_record(scene, 0, result=result,
+                                      action=route.actions[0] if route else None)}
 
 
 def main(argv=None):
@@ -155,6 +205,8 @@ def main(argv=None):
     parser.add_argument('--trace', type=Path)
     parser.add_argument('--state', action='append', default=[], help='Fresh EPISODE:STEP')
     parser.add_argument('--repeats', type=int, default=7)
+    parser.add_argument('--audit-budget', action='store_true', help='Compare bounded search and first-action coverage')
+    parser.add_argument('--guide-static', action='store_true', help='Compare verified static subgoals')
     parser.add_argument('--output', type=Path, default=Path('runs/short-planning'))
     args = parser.parse_args(argv)
     if not 1 <= args.repeats <= 20 or bool(args.trace) != bool(args.state):
@@ -166,6 +218,9 @@ def main(argv=None):
     except ValueError:
         parser.error('States must be unique nonnegative EPISODE:STEP pairs')
     trace, digest = trace_cases(args.trace, states, LONG_HORIZON) if states else ([], None)
+    modes = {**MODES, **BUDGET_MODES} if args.audit_budget else dict(MODES)
+    if args.guide_static:
+        modes['static_guided_ttc'] = {}
     output = args.output
     suffix = 0
     while True:
@@ -176,31 +231,53 @@ def main(argv=None):
             suffix += 1
             output = args.output.with_name(f'{args.output.name}-{suffix:03d}')
     report = {
-        'planner_contract': 'short-nine-swept-v1',
+        'planner_contract': 'short-nine-swept-v2',
         'configuration': {'hold': HOLD, 'short_horizon': SHORT_HORIZON, 'long_horizon': LONG_HORIZON,
                           'ttc_horizon': TTC_HORIZON, 'ttc_weight': TTC_WEIGHT, 'turn_weight': TURN_WEIGHT,
                           'exit_slack': EXIT_SLACK, 'exit_delay': EXIT_DELAY,
                           'smooth_score_tolerance': SMOOTH_TOLERANCE, 'width': 16, 'repeats': args.repeats},
+        'mode_settings': {name: {key: asdict(value) if isinstance(value, SearchBudget) else value
+                                 for key, value in settings.items()} for name, settings in modes.items()},
         'trace': {'path': str(args.trace.resolve()), 'sha256': digest} if trace else None,
         'pass_definition': {'micro': 'Complete model rollout and satisfy the declared arrival expectation',
-                            'trace': 'Find a reference-checked prefix of at least 16 frames'},
+                            'trace': 'Find a reference-checked prefix of at least 16 frames in every repetition'},
         'timing_scope': 'Planner call including trigger and TTC. Excludes decoding, reference replay and game IO.',
         'model_limits': 'Known constant-velocity circles and timed static lasers. Frozen trace counterfactuals.',
         'micro': [], 'snapshots': [],
     }
     for case in benchmark_cases():
+        results = {name: _rollout(case, settings, guide_static=name == 'static_guided_ttc')
+                   for name, settings in modes.items()}
+        if args.audit_budget:
+            reference = _reference_actions(case)
+            for result in results.values():
+                result['initial_coverage'] = _compare_coverage(result['decisions'][0]['search'], reference)
         report['micro'].append({'name': case['name'], 'scene': asdict(case['scene']),
                                 'goal': asdict(case['goal']) if case.get('goal') else None,
                                 'expect_arrival': case.get('expect_arrival'), 'horizon': case['horizon'],
                                 'collision_audit': _audit_collision(case['scene']),
-                                'modes': {name: _rollout(case, settings) for name, settings in MODES.items()}})
+                                'modes': results})
     for case in trace:
+        results = {name: _snapshot(case, settings, args.repeats) for name, settings in modes.items()}
+        if args.audit_budget:
+            reference = _reference_actions(case)
+            for result in results.values():
+                result['coverage'] = _compare_coverage(result['search'], reference)
         report['snapshots'].append({'name': case['name'], 'metadata': case['metadata'],
+                                    'scene': asdict(case['scene']),
                                     'collision_audit': _audit_collision(case['scene']),
-                                    'modes': {name: _snapshot(case, settings, args.repeats)
-                                              for name, settings in MODES.items()}})
+                                    'modes': results})
+    if args.guide_static:
+        scene = Scene((20., 20.), bounds=(0., 40., 0., 40.))
+        ticks = iter((0., 0., .002, .002))
+        result = plan(scene, budget=SearchBudget(378, 1.), clock=lambda: next(ticks))
+        report['diagnostic_tracks'] = [{
+            'label': 'Time cutoff / checked prefix', 'scene': asdict(scene),
+            'source': 'Injected clock diagnostic. Not a measured runtime sample.',
+            'frames': [decision_record(scene, 0, result=result, action=result.selected.actions[0])],
+        }]
     report['pass_counts'] = {group: {mode: sum(case['modes'][mode]['pass'] for case in report[group])
-                                      for mode in MODES} for group in ('micro', 'snapshots')}
+                                      for mode in modes} for group in ('micro', 'snapshots')}
     target = output / 'report.json'
     target.write_text(json.dumps(report, indent=2, allow_nan=False) + '\n', encoding='utf-8')
     lines = [f'Report: {target.resolve()}']

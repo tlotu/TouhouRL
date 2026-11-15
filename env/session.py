@@ -111,7 +111,7 @@ class GameSession:
                 raise FrameTimeout("Too much time passed since the last observation")
             input_started = self.clock()
             observation_age = input_started - self.sample_received_at
-            self.controls.apply(action)
+            input_dispatch = self.controls.apply(action)
             input_finished = self.clock()
             previous = self.sample
             self.sample, frames, seconds = self.stepper.advance(previous)
@@ -121,6 +121,8 @@ class GameSession:
                            "input_send_seconds": input_finished - input_started,
                            "post_input_wait_seconds": seconds,
                            "previous_action": self.previous_action, "applied_action": int(action)}
+            if input_dispatch is not None:
+                self.timing["input_dispatch"] = input_dispatch
             self.previous_action = int(action)
             self.elapsed_frames += frames
             if self.sample.result_menu is not None and (

@@ -157,6 +157,7 @@ def trace_cases(path, states, horizon):
                                 prior_dropped_bullets=info.get("dropped_bullets"),
                                 prior_radius_fallback_count=info.get("radius_fallback_count"),
                                 prior_action=prior.get("action") if aligned else None,
+                                recorded_action=row.get("action"),
                                 source_model_sha256=header.get("model_sha256"))
                 found[key] = {"name": f"trace-ep{key[0]}-step{key[1]}", "scene": scene,
                               "horizon": horizon, "metadata": metadata}

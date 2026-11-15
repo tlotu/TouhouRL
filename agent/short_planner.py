@@ -1,10 +1,12 @@
 """Offline nine-direction beam planner with timed exit hints and stable actions."""
 from dataclasses import dataclass, replace
 import math
+import time
 
 import numpy as np
 
 from env.action_emulator import DIRECTIONS
+from .direction_buffer import DirectionBuffer
 from .forward_model import _point_segment, _segment_distance
 from .swept_collision import CollisionCounts, SweptCollision, _boxes, _overlap_pairs
 from .timed_planner import TimedGoal
@@ -40,7 +42,7 @@ class ExitHint:
     source: str
 
 
-def exit_hint(scene, goal=None):
+def exit_hint(scene, goal=None, *, expired=None, nearest_closure=False):
     """Estimate closure on a goal ray or nearby escape rays from known warnings.
 
     Travel is nominal straight-line motion, capped at 32 frames. This heuristic
@@ -83,6 +85,8 @@ def exit_hint(scene, goal=None):
     lo, hi = np.zeros(len(ray)), duration[ray].copy()
     # Find the last contact by testing whether the remaining ray intersects.
     for _ in range(8):
+        if expired is not None and expired():
+            return None
         mid = (lo + hi) / 2
         tail = origin + velocity[ray] * mid[:, None]
         intersects = _segment_distance(tail, ends[ray], first[beam], last[beam]) <= radius[beam]
@@ -90,7 +94,7 @@ def exit_hint(scene, goal=None):
         hi = np.where(intersects, hi, mid)
     clear = np.ceil(hi).astype(int)
     slack = closing - clear - EXIT_DELAY
-    selected = int(np.argmin(slack))
+    selected = int(np.lexsort((slack, closing))[0] if nearest_closure else np.argmin(slack))
     return ExitHint(float(closing[selected]), int(clear[selected]), float(slack[selected]),
                     'local_rays' if goal is None else 'goal_ray')
 
@@ -105,6 +109,30 @@ class Route:
     turn: float = 0.
     arrival: int | None = None
     ttc: float = 0.
+    buffer: DirectionBuffer | None = None
+    motion: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class SearchBudget:
+    max_edges: int
+    max_ms: float | None = None
+
+    def __post_init__(self):
+        if type(self.max_edges) is not int or self.max_edges < len(DIRECTIONS):
+            raise ValueError('Edge budget must cover the first layer')
+        if self.max_ms is not None and (not math.isfinite(self.max_ms) or self.max_ms <= 0):
+            raise ValueError('Invalid time budget')
+
+
+@dataclass(frozen=True)
+class LayerCoverage:
+    frame: int
+    edges: int
+    safe_edges: int
+    before_pruning: tuple[int, ...]
+    retained: tuple[int, ...]
+    retained_routes: int
 
 
 @dataclass
@@ -114,10 +142,21 @@ class Plan:
     horizon: int
     hint: ExitHint | None
     counts: CollisionCounts
+    layers: tuple[LayerCoverage, ...]
+    stop_reason: str
+    ttc_evaluated: bool = False
+    candidates: tuple[Route, ...] = ()
 
     @property
     def smoothed(self):
         return self.selected is not self.proposed
+
+    @property
+    def checked_edges(self):
+        return sum(layer.edges for layer in self.layers)
+
+    def first_actions_at(self, frame):
+        return next((layer.retained for layer in self.layers if layer.frame == frame), ())
 
 
 def _score(route, goal, ttc_weight):
@@ -129,7 +168,7 @@ def _score(route, goal, ttc_weight):
     return route.arrival is not None, -route.arrival if route.arrival is not None else 0, value
 
 
-def _keep_diverse(routes, width, score):
+def _keep_diverse(routes, width, score, origin, cell_size):
     # For equal scores retain some sustained motions before spending the beam
     # on paths that differ only by where a wait was inserted.
     ranked = sorted(routes, key=lambda route: (*score(route), route.actions.count(route.actions[0])),
@@ -146,7 +185,24 @@ def _keep_diverse(routes, width, score):
             counts[action] += 1
         else:
             remaining.append(route)
-    return retained + remaining[:width - len(retained)]
+    if cell_size is None:
+        return retained + remaining[:width - len(retained)]
+
+    def cell(route):
+        return tuple(math.floor((p - root) / cell_size + 0.5) for p, root in zip(route.point, origin))
+
+    occupied = {cell(route) for route in retained}
+    duplicates = []
+    for route in remaining:
+        if len(retained) == width:
+            break
+        location = cell(route)
+        if location in occupied:
+            duplicates.append(route)
+        else:
+            occupied.add(location)
+            retained.append(route)
+    return retained + duplicates[:width - len(retained)]
 
 
 def _select(routes, score, previous_action, smooth):
@@ -171,68 +227,237 @@ def _select(routes, score, previous_action, smooth):
 
 
 def plan(scene, goal: TimedGoal | None = None, *, previous_action=0, width=16,
-         ttc_weight=TTC_WEIGHT, adaptive=False, smooth=True):
-    """Search at a fresh four-frame action boundary using known hazards."""
+         ttc_weight=TTC_WEIGHT, adaptive=False, smooth=True, budget=None,
+         cell_size=None, clock=time.perf_counter, input_buffer: DirectionBuffer | None = None,
+         switch_delay=0, deadline=None, leaf_reserve_ms=0., collision_model=None,
+         horizon_override=None, first_action=None):
+    """Search at a fresh four-frame boundary using known hazards.
+
+    The absolute deadline uses the caller's clock. With it, search polls between
+    small expansions and buffered motion frames. A partial layer can supply
+    the deepest verified route. The optional TTC reserve stops expansion early
+    so the last verified frontier can still be ranked. NumPy kernels are synchronous.
+    """
     if type(previous_action) is not int or not 0 <= previous_action < len(DIRECTIONS):
         raise ValueError('Invalid previous action')
-    if type(width) is not int or width < len(DIRECTIONS):
+    if type(switch_delay) is not int or switch_delay not in (0, 1):
+        raise ValueError('Switch delay must be zero or one frame')
+    if width is None and adaptive:
+        raise ValueError('Unpruned search is limited to the short horizon')
+    if width is not None and (type(width) is not int or width < len(DIRECTIONS)):
         raise ValueError('Beam width must cover all first actions')
     if not math.isfinite(ttc_weight) or ttc_weight < 0:
         raise ValueError('Invalid TTC weight')
-    hint = exit_hint(scene, goal) if adaptive else None
+    if cell_size is not None and (not math.isfinite(cell_size) or cell_size <= 0):
+        raise ValueError('Invalid spatial coverage cell size')
+    if not math.isfinite(leaf_reserve_ms) or leaf_reserve_ms < 0:
+        raise ValueError('Invalid TTC time reserve')
+    if horizon_override is not None and (type(horizon_override) is not int
+            or not SHORT_HORIZON <= horizon_override <= 104 or horizon_override % HOLD):
+        raise ValueError('Invalid horizon override')
+    if width is None and horizon_override is not None and horizon_override > SHORT_HORIZON:
+        raise ValueError('Unpruned search is limited to the short horizon')
+    if first_action is not None and not 0 <= first_action < len(DIRECTIONS):
+        raise ValueError('Invalid first action')
+    anytime = deadline is not None
+    if budget and budget.max_ms is not None:
+        local_deadline = clock() + budget.max_ms / 1000
+        deadline = local_deadline if deadline is None else min(deadline, local_deadline)
+
+    def time_expired():
+        return deadline is not None and clock() >= deadline
+
+    poll_expansion = time_expired if anytime else lambda: False
+    hint = exit_hint(scene, goal, expired=poll_expansion) if adaptive and not poll_expansion() else None
     horizon = LONG_HORIZON if hint is not None and hint.slack_frames <= EXIT_SLACK else SHORT_HORIZON
-    model = SweptCollision(scene)
+    if horizon_override is not None:
+        horizon = horizon_override
+    if collision_model is not None and collision_model.scene is not scene:
+        raise ValueError('Collision model must use the search scene')
+    model = collision_model if collision_model is not None else SweptCollision(scene)
+    counts_before = replace(model.counts)
+
+    def search_counts():
+        return CollisionCounts(model.counts.boundary_pruned - counts_before.boundary_pruned,
+                               model.counts.potential_pairs - counts_before.potential_pairs,
+                               model.counts.checked_pairs - counts_before.checked_pairs)
+
+    if poll_expansion():
+        return Plan(None, None, horizon, hint, search_counts(), (), 'time_limit')
     valid, _ = model.edges([scene.player], [scene.player], 0, 0)
     if not valid[0]:
-        return Plan(None, None, horizon, hint, model.counts)
+        return Plan(None, None, horizon, hint, search_counts(), (), 'unsafe_start')
+    reserve = 0.
+    if anytime and ttc_weight and leaf_reserve_ms:
+        reserve = min(leaf_reserve_ms / 1000, max(0., deadline - clock()) / 4)
+
+    def expansion_expired():
+        return deadline is not None and clock() >= deadline - reserve
+
+    poll_expansion = expansion_expired if anytime else lambda: False
     arrival = 0 if goal is not None and goal.reached(scene.player, 0) else None
-    routes = [Route((0, 0, 0, 0), scene.player, heading=previous_action, arrival=arrival)]
+    routes = [Route((0, 0, 0, 0), scene.player, heading=previous_action, arrival=arrival, buffer=input_buffer)]
     step = scene.speed * HOLD
     origin = np.asarray(scene.player)
 
     def score(route):
         return _score(route, goal, ttc_weight)
 
-    reached = 0
+    reached = checked_edges = 0
+    layers = []
+    stop_reason = 'horizon'
     for frame in range(0, horizon, HOLD):
-        offsets = (np.array([route.offset for route in routes])[:, None, :] + OFFSETS).reshape(-1, 4)
-        starts = np.repeat(np.array([route.point for route in routes]), len(DIRECTIONS), axis=0)
-        ends = origin + step * (offsets[:, :2] + offsets[:, 2:] / math.sqrt(2))
-        valid, clearance = model.edges(starts, ends, frame, HOLD)
+        edge_count = len(routes) * len(DIRECTIONS)
+        if expansion_expired():
+            stop_reason = 'time_limit'
+            break
+        if budget and checked_edges + edge_count > budget.max_edges:
+            stop_reason = 'edge_limit'
+            break
         following = {}
-        for index in np.flatnonzero(valid):
-            parent_index, action = divmod(int(index), len(DIRECTIONS))
-            parent = routes[parent_index]
-            point = tuple(map(float, ends[index]))
-            offset = tuple(map(int, offsets[index]))
-            arrival = parent.arrival
-            if arrival is None and goal is not None and goal.reached(point, frame + HOLD):
-                arrival = frame + HOLD
-            route = Route(offset, point, parent.actions + (action,), action or parent.heading,
-                          min(parent.clearance, float(clearance[index])),
-                          parent.turn + float(ANGLES[parent.heading, action]), arrival)
-            key = (offset, route.heading, route.actions[0], arrival is not None)
-            if key not in following or score(route) > score(following[key]):
-                following[key] = route
+        layer_edges = safe_edges = 0
+        batch_size = 3 if anytime else len(routes)
+        for start in range(0, len(routes), batch_size):
+            if start and expansion_expired():
+                stop_reason = 'time_limit'
+                break
+            batch = routes[start:start + batch_size]
+            extensions = _expand(model, batch, origin, step, frame, goal, switch_delay, poll_expansion)
+            layer_edges += len(batch) * len(DIRECTIONS)
+            if extensions is None:
+                stop_reason = 'time_limit'
+                break
+            safe_edges += len(extensions)
+            for route in extensions:
+                if frame == 0 and first_action is not None and route.actions[0] != first_action:
+                    continue
+                key = (route.offset, route.heading, route.actions[0], route.arrival is not None, route.buffer)
+                if key not in following or score(route) > score(following[key]):
+                    following[key] = route
+        if poll_expansion():
+            stop_reason = 'time_limit'
+        checked_edges += layer_edges
         if not following:
+            layers.append(LayerCoverage(frame + HOLD, layer_edges, 0, (), (), 0))
+            if stop_reason != 'time_limit':
+                stop_reason = 'no_safe_extension'
             break
         reached = frame + HOLD
         routes = list(following.values())
-        if reached == horizon and ttc_weight:
-            times = model.stationary_ttc([route.point for route in routes], reached, TTC_HORIZON)
-            routes = [replace(route, ttc=float(ttc)) for route, ttc in zip(routes, times)]
-        routes = _keep_diverse(routes, width, score)
+        before_pruning = tuple(sorted({route.actions[0] for route in routes}))
+        # Preserve all final candidates until the common TTC ranking.
+        if width is not None and reached != horizon:
+            routes = _keep_diverse(routes, width, score, origin, cell_size)
+        layers.append(LayerCoverage(reached, layer_edges, safe_edges, before_pruning,
+                                    tuple(sorted({route.actions[0] for route in routes})), len(routes)))
+        if stop_reason == 'time_limit':
+            break
     if not reached:
-        return Plan(None, None, horizon, hint, model.counts)
-    if reached < horizon and ttc_weight:
-        times = model.stationary_ttc([route.point for route in routes], reached, TTC_HORIZON)
-        routes = [replace(route, ttc=float(ttc)) for route, ttc in zip(routes, times)]
+        return Plan(None, None, horizon, hint, search_counts(), tuple(layers), stop_reason)
+    ttc_evaluated = False
+    if ttc_weight and (stop_reason != 'time_limit' or reserve) and (anytime or not time_expired()):
+        times = []
+        batch_size = 27 if anytime else len(routes)
+        for start in range(0, len(routes), batch_size):
+            batch_times = _leaf_ttc(model, routes[start:start + batch_size], reached, switch_delay,
+                                    expired=time_expired if anytime else poll_expansion)
+            if batch_times is None:
+                stop_reason = 'time_limit'
+                break
+            times.extend(batch_times)
+        if len(times) == len(routes):
+            routes = [replace(route, ttc=float(ttc)) for route, ttc in zip(routes, times)]
+            ttc_evaluated = True
+    if width is not None and reached == horizon:
+        routes = _keep_diverse(routes, width, score, origin, cell_size)
+        layers[-1] = replace(layers[-1], retained=tuple(sorted({r.actions[0] for r in routes})),
+                             retained_routes=len(routes))
     proposed, selected = _select(routes, score, previous_action, smooth)
-    return Plan(proposed, selected, horizon, hint, model.counts)
+    return Plan(proposed, selected, horizon, hint, search_counts(), tuple(layers), stop_reason,
+                ttc_evaluated, tuple(routes))
+
+
+def _expand(model, batch, origin, step, frame, goal, switch_delay, expired):
+    starts = np.repeat(np.array([route.point for route in batch]), len(DIRECTIONS), axis=0)
+    roots = np.array([route.offset for route in batch])
+    buffered = batch[0].buffer is not None
+    if buffered:
+        transitions = [route.buffer.advance(action, HOLD, switch_delay)
+                       for route in batch for action in range(len(DIRECTIONS))]
+        motion = np.array([moves for moves, _ in transitions])
+        trajectory = np.repeat(roots, len(DIRECTIONS), axis=0)[:, None, :] + OFFSETS[motion].cumsum(axis=1)
+        points = origin + (step / HOLD) * (trajectory[..., :2] + trajectory[..., 2:] / math.sqrt(2))
+        offsets, ends = trajectory[:, -1], points[:, -1]
+        checked = _motion_edges(model, starts, points, frame, expired=expired)
+        if checked is None:
+            return None
+        valid, clearance = checked
+    else:
+        offsets = (roots[:, None, :] + OFFSETS).reshape(-1, 4)
+        ends = origin + step * (offsets[:, :2] + offsets[:, 2:] / math.sqrt(2))
+        valid, clearance = model.edges(starts, ends, frame, HOLD)
+    extensions = []
+    for index in np.flatnonzero(valid):
+        parent_index, action = divmod(int(index), len(DIRECTIONS))
+        parent = batch[parent_index]
+        point = tuple(map(float, ends[index]))
+        arrival = parent.arrival
+        if arrival is None and goal is not None and goal.reached(point, frame + HOLD):
+            arrival = frame + HOLD
+        moves, tail = transitions[index] if buffered else ((), None)
+        extensions.append(Route(tuple(map(int, offsets[index])), point, parent.actions + (action,),
+                                action or parent.heading, min(parent.clearance, float(clearance[index])),
+                                parent.turn + float(ANGLES[parent.heading, action]), arrival,
+                                buffer=tail, motion=parent.motion + moves))
+    return extensions
 
 
 def route_points(scene, route):
-    """Reconstruct segment endpoints from the selected action sequence."""
+    """Return held endpoints for nominal motion or frame vertices for buffered motion."""
+    if route.motion:
+        offsets = np.vstack((np.zeros((1, 4), dtype=int), OFFSETS[list(route.motion)].cumsum(axis=0)))
+        return scene.player + scene.speed * (offsets[:, :2] + offsets[:, 2:] / math.sqrt(2))
     actions = list(route.actions)
     offsets = np.vstack((np.zeros((1, 4), dtype=int), OFFSETS[actions].cumsum(axis=0)))
     return scene.player + scene.speed * HOLD * (offsets[:, :2] + offsets[:, 2:] / math.sqrt(2))
+
+
+def _motion_edges(model, starts, points, frame, *, expired):
+    valid = np.ones(len(starts), dtype=bool)
+    clearance = np.full(len(starts), model.clearance_cap)
+    for index in range(points.shape[1]):
+        if expired():
+            return None
+        live = np.flatnonzero(valid)
+        if not len(live):
+            break
+        ends = points[live, index]
+        safe, gaps = model.edges(starts[live], ends, frame + index, 1)
+        valid[live] = safe
+        clearance[live] = np.minimum(clearance[live], gaps)
+        starts = points[:, index]
+    return valid, clearance
+
+
+def _leaf_ttc(model, routes, frame, delay, *, expired):
+    if expired():
+        return None
+    starts = np.array([route.point for route in routes])
+    if routes[0].buffer is None:
+        return model.stationary_ttc(starts, frame, TTC_HORIZON)
+    moves = [route.buffer.advance(0, HOLD, delay)[0] for route in routes]
+    points = starts[:, None, :] + model.scene.speed * VECTORS[np.array(moves)].cumsum(axis=1)
+    times = np.full(len(routes), -1.)
+    for i in range(HOLD):
+        if expired():
+            return None
+        live = np.flatnonzero(times < 0)
+        ends = points[live, i]
+        safe, _ = model.edges(starts[live], ends, frame + i, 1)
+        times[live[~safe]] = i  # Conservative lower bound within the contact frame.
+        starts = points[:, i]
+    live = np.flatnonzero(times < 0)
+    if expired():
+        return None
+    times[live] = HOLD + model.stationary_ttc(starts[live], frame + HOLD, TTC_HORIZON - HOLD)
+    return times

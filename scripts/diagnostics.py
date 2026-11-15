@@ -87,11 +87,18 @@ class DiagnosticLog:
         print(f"Diagnostic log: {self.path.resolve()}", file=sys.stderr)
         print(f"Console log: {self.console_path.resolve()}", file=sys.stderr)
 
-    def emit(self, record, console=True):
+    def emit(self, record, console=True, timings=None):
+        if timings is not None:
+            started = time.perf_counter()
         line = json.dumps(record, allow_nan=False)
+        if timings is not None:
+            encoded = time.perf_counter()
+            timings['json_encode_seconds'] = encoded - started
         if self.file:
             self.file.write(line + "\n")
             self.file.flush()
+        if timings is not None:
+            timings['json_write_seconds'] = time.perf_counter() - encoded
         if console:
             visible = _compact_event(record) if self.file else line
             if visible is not None:

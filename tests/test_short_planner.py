@@ -2,11 +2,13 @@
 from dataclasses import replace
 import math
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
+from agent.direction_buffer import DirectionBuffer
 from agent.forward_model import Circle, ForwardModel, Scene, TimedLaser
-from agent.short_planner import HOLD, LONG_HORIZON, SHORT_HORIZON, exit_hint, plan, route_points
+from agent.short_planner import HOLD, LONG_HORIZON, SHORT_HORIZON, SearchBudget, exit_hint, plan, route_points
 from agent.swept_collision import SweptCollision
 from agent.timed_planner import TimedGoal
 from scripts.probe_short_planning import _rollout, benchmark_cases
@@ -60,6 +62,80 @@ class SweptCollisionTests(unittest.TestCase):
 
 
 class ShortPlannerTests(unittest.TestCase):
+    def test_reserved_leaf_time_scores_a_truncated_layer(self):
+        scene = Scene((40, 40), bounds=(0, 80, 0, 80))
+        now = 0.
+        original = SweptCollision.edges
+
+        def edges(model, starts, ends, frame, duration):
+            nonlocal now
+            result = original(model, starts, ends, frame, duration)
+            if frame == 7:
+                now = .0092
+            return result
+
+        with patch.object(SweptCollision, 'edges', edges):
+            result = plan(scene, width=9, input_buffer=DirectionBuffer(), clock=lambda: now,
+                          deadline=.010, leaf_reserve_ms=1.)
+        self.assertEqual(result.stop_reason, 'time_limit')
+        self.assertEqual(len(result.selected.motion), 8)
+        self.assertTrue(result.ttc_evaluated)
+        self.assertEqual(result.selected.ttc, 60.)
+
+    def test_absolute_deadline_preserves_completed_batch_in_partial_layer(self):
+        scene = Scene((40, 40), bounds=(0, 80, 0, 80))
+        now = 0.
+        original = SweptCollision.edges
+
+        def edges(model, starts, ends, frame, duration):
+            nonlocal now
+            result = original(model, starts, ends, frame, duration)
+            if frame == 7:  # Last motion frame in the first batch of layer two.
+                now = 1.
+            return result
+
+        with patch.object(SweptCollision, 'edges', edges):
+            result = plan(scene, width=9, input_buffer=DirectionBuffer(), clock=lambda: now, deadline=1.)
+        self.assertEqual(result.stop_reason, 'time_limit')
+        self.assertEqual(result.checked_edges, 36)
+        self.assertEqual(len(result.selected.motion), 8)
+        self.assertFalse(result.ttc_evaluated)
+        points = route_points(scene, result.selected)
+        reference = ForwardModel(scene)
+        self.assertTrue(all(reference.edges(points[i:i+1], points[i+1:i+2], i, 1)[0][0]
+                            for i in range(8)))
+
+    def test_edge_limit_returns_only_a_checked_prefix(self):
+        scene = Scene((40, 40), (Circle(46, 40, 0, 0, 1),), bounds=(0, 80, 0, 80))
+        result = plan(scene, previous_action=3, budget=SearchBudget(9))
+        self.assertEqual(result.stop_reason, 'edge_limit')
+        self.assertEqual(result.checked_edges, 9)
+        self.assertEqual(len(result.selected.actions), 1)
+        self.assertNotIn(3, result.first_actions_at(HOLD))
+        points = route_points(scene, result.selected)
+        self.assertTrue(ForwardModel(scene).edges(points[:1], points[1:], 0, HOLD)[0][0])
+
+    def test_time_limit_reports_unscored_ttc_and_retains_verified_layer(self):
+        scene = Scene((40, 40), bounds=(0, 80, 0, 80))
+        ticks = iter((0., 0., .002, .002))
+        result = plan(scene, budget=SearchBudget(378, 1.), clock=lambda: next(ticks))
+        self.assertEqual(result.stop_reason, 'time_limit')
+        self.assertEqual(result.checked_edges, 9)
+        self.assertEqual(len(result.selected.actions), 1)
+        self.assertFalse(result.ttc_evaluated)
+        ticks = iter((0., .002))
+        result = plan(scene, budget=SearchBudget(378, 1.), clock=lambda: next(ticks))
+        self.assertEqual(result.stop_reason, 'time_limit')
+        self.assertEqual(result.checked_edges, 0)
+        self.assertIsNone(result.selected)
+
+    def test_unpruned_reference_distinguishes_reachable_actions_from_blocked_ones(self):
+        case = next(c for c in benchmark_cases() if c['name'] == 'required_reversal')
+        result = plan(case['scene'], width=None, ttc_weight=0.)
+        self.assertEqual(result.first_actions_at(SHORT_HORIZON), (3,))
+        result = plan(Scene((40, 40), bounds=(0, 80, 0, 80)), cell_size=8.)
+        self.assertEqual(result.first_actions_at(SHORT_HORIZON), tuple(range(9)))
+
     def test_required_reversal_is_kept_with_angular_cost(self):
         case = next(c for c in benchmark_cases() if c['name'] == 'required_reversal')
         route = plan(case['scene']).selected

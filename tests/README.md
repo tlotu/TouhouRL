@@ -138,7 +138,7 @@ source preservation / teacher-data exclusion. The current full suite passes
 policy candidate agreement, sampled likelihoods, nonempty Adam preservation,
 actual actor updates and restored updates, configuration guards, source-preserving
 preparation, canonical evaluation and fake-native risk training diagnostics.
-The current full suite passes 311 tests. `test_short_planner.py` covers swept
+The current full suite passes 317 tests. `test_short_planner.py` covers swept
 filter agreement, timed collision, boundary clipping, TTC, necessary reversals,
 closure triggers, and replay of the route selected by action smoothing.
 

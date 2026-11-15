@@ -7,9 +7,12 @@ import unittest
 from env.movement_probe import BASELINE_BUILD, MovementProbe, annotate_movement
 from env.memory_reader import MemoryReadError
 from env.windows import WindowsKeyboard
-from env.action_emulator import ActionEmulator
+from env.action_emulator import ActionEmulator, InputError
 from tests.fakes import FakeKeyboard
-from scripts.probe_input import MOVEMENT_PHASES, MovementModePolicy
+from scripts.analyze_input_switch import classify_switch, switch_states
+from scripts.probe_input import (
+    MOVEMENT_PHASES, SWITCH_PHASES, MovementModePolicy, ProbePolicy, SwitchTimingControls, SwitchTimingKeyboard,
+)
 
 
 class CandidateReader:
@@ -33,6 +36,59 @@ class CandidateReader:
 
 
 class MovementProbeTests(unittest.TestCase):
+    def test_guarded_direction_rejects_a_cross_frame_mask_read(self):
+        probe = MovementProbe(CandidateReader((10, 11)), BASELINE_BUILD)
+        self.assertIsNone(probe.direction(10))
+        reader = CandidateReader()
+        reader._read = lambda *_: struct.pack('<H', 0x8195)
+        self.assertEqual(MovementProbe(reader, BASELINE_BUILD).direction(10), 2)
+
+    def test_switch_probe_brackets_existing_release_and_press_order(self):
+        frames = iter((10, 10, 12, 13))
+        controls = SwitchTimingControls(FakeKeyboard(), lambda: next(frames))
+        controls.apply(3)
+        controls.apply(8)
+        self.assertEqual(controls.last_switch, {'frame_before_send': 12, 'frame_after_send': 13,
+                                               'events': [('up', 'right'), ('down', 'left'), ('down', 'up')]})
+        session = SimpleNamespace(elapsed_frames=6)
+        self.assertEqual(ProbePolicy(session, SWITCH_PHASES)({}), 3)
+
+    def test_switch_batch_preserves_order_in_one_send(self):
+        keyboard = SwitchTimingKeyboard.__new__(SwitchTimingKeyboard)
+        keyboard.events = []
+        keyboard.is_foreground = lambda: True
+        calls = []
+
+        def send(count, events, size):
+            calls.append([(event.value.keyboard.scan, event.value.keyboard.flags) for event in events])
+            return count
+
+        keyboard.user = SimpleNamespace(SendInput=send)
+        controls = SwitchTimingControls(keyboard, lambda: 10, batch=True)
+        controls.held = {'right', 'shift', 'z'}
+        controls.apply(8)
+        self.assertEqual(calls, [[(0x4D, 11), (0x4B, 9), (0x48, 9)]])
+        self.assertEqual(controls.held, {'up', 'left', 'shift', 'z'})
+        self.assertEqual(len({event['started_at'] for event in controls.last_switch['events']}), 1)
+
+    def test_partial_switch_batch_releases_all_potentially_owned_keys(self):
+        keyboard = FakeKeyboard()
+        keyboard.send_batch = lambda _: 1
+        controls = SwitchTimingControls(keyboard, lambda: 10, batch=True)
+        controls.held = {'right', 'shift', 'z'}
+        with self.assertRaisesRegex(InputError, 'accepted 1 of 3'):
+            controls.apply(8)
+        self.assertFalse(controls.held)
+        self.assertEqual(keyboard.events, [('up', key) for key in ('left', 'right', 'shift', 'up', 'z')])
+
+    def test_diagonal_switch_displacement_requires_intermediate_in_model(self):
+        self.assertEqual(switch_states(0, 2), (0, 3, 2))
+        classification, matches = classify_switch((192., 384.), (195.414214, 382.585786), 2, 0, 2)
+        self.assertEqual(classification, 'intermediate_required_in_model')
+        self.assertEqual(matches, [(3, 2)])
+        delayed, _ = classify_switch((192., 384.), (193.414214, 382.585786), 2, 0, 2)
+        self.assertEqual(delayed, 'old_and_new_compatible')
+
     def test_candidate_values_remain_unverified_and_frame_tagged(self):
         r = MovementProbe(CandidateReader(), BASELINE_BUILD).capture(10)
         self.assertTrue(r["same_transition_frame"])

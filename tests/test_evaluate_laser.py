@@ -6,13 +6,18 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+import numpy as np
+
 from agent.laser_contract import LASER_TASK
 from agent.laser_evaluation import LaserEvaluationCommitment
 from agent.laser_policy import encode_lasers
+from agent.laser_shadow import BUFFERED_LEAF_CONFIG, SHADOW_CONFIG, LaserBufferedReuseCommitment
+from scripts.analyze_laser_shadow import analyze, first_partition
 from tests.fakes import FakeKeyboard
 from tests.test_laser_geometry import laser
 from tests.test_training import FakeTask
@@ -20,6 +25,63 @@ from tests import test_train_laser
 
 
 class LaserEvaluationTests(unittest.TestCase):
+    def test_buffered_cache_discards_suffix_that_ends_in_a_warning_beam(self):
+        frame = 2
+        controller = LaserBufferedReuseCommitment(lambda _: [1.] + [0.] * 8, lambda: frame,
+                                                   clock=lambda: 0.)
+        controller.since = controller.held_action = 0
+        beam = laser(phase=0, timer=20)
+        beam['segment_candidate'] = [[192., 100.], [192., 400.]]
+        obs = {'player': np.zeros(4, dtype=np.float32), 'lasers': encode_lasers([beam]),
+               'bullets': np.zeros((1, 7), dtype=np.float32)}
+
+        def seed_cache():
+            controller.cached_frame, controller.cached_horizon = 0, 60
+            controller.cached_actions = (0,) * 6
+
+        seed_cache()
+        self.assertEqual(controller(obs), 0)
+        held = controller.annotate({'event': 'transition', 'action': 0,
+                                    'info': {'elapsed_frames': 4, 'delta_frames': 2}})
+        record = held['planner_shadow']
+        self.assertEqual((record['source'], record['recheck']), ('hold', 'warning_ttc'))
+        self.assertEqual(record['cache_warning_ttc_frames'], 18.)
+        self.assertEqual(record['checked_prefix_frames'], 2)
+        self.assertEqual(controller.cached_actions, ())
+
+        frame = 4
+        seed_cache()
+        self.assertEqual(controller(obs), 0)
+        record = controller.last['planner_shadow']
+        self.assertEqual((record['source'], record['recheck']), ('search', 'warning_ttc'))
+
+    def test_buffered_hold_rechecks_suffix_and_only_searches_on_collision(self):
+        frame = 0
+        controller = LaserBufferedReuseCommitment(lambda _: [1.] + [0.] * 8, lambda: frame,
+                                                   clock=lambda: 0.)
+        obs = {'player': np.zeros(4, dtype=np.float32), 'lasers': encode_lasers([]),
+               'bullets': np.zeros((1, 7), dtype=np.float32)}
+
+        def step():
+            nonlocal frame
+            action = controller(obs)
+            frame += 2
+            return controller.annotate({'event': 'transition', 'action': action,
+                                        'info': {'elapsed_frames': frame, 'delta_frames': 2}})
+
+        self.assertEqual(step()['planner_shadow']['source'], 'search')
+        reused = step()['planner_shadow']
+        self.assertTrue(reused['cache_reused'])
+        self.assertEqual(reused['checked_prefix_frames'], 14)
+        self.assertEqual(reused['route_durations'][0], 2)
+        step()
+        obs['bullets'][0] = [4. / 384, 0., -1. / 16, 0., 0., 0., 1.]
+        interrupted = step()
+        self.assertTrue(interrupted['commitment_active'])
+        self.assertEqual(interrupted['planner_shadow']['source'], 'search')
+        self.assertEqual(interrupted['planner_shadow']['recheck'], 'collision')
+        self.assertEqual(interrupted['action'], 0)
+
     def test_fake_native_evaluation_is_frozen_and_records_combined_candidates(self):
         from scripts.train_laser import main as prepare
         from scripts.evaluate_laser import main as evaluate
@@ -36,12 +98,16 @@ class LaserEvaluationTests(unittest.TestCase):
             obs['lasers']=encode_lasers([beam])
             class Task(FakeTask):
                 capacity=4
+                sample_received_at=property(lambda _:time.perf_counter())
+                timing={'sample_read_seconds':.002}
                 @property
                 def elapsed_frames(self):return self.position*2
                 def reset(self):
                     _,info=super().reset();return deepcopy(obs),info
                 def step(self,action):
                     _,reward,done,truncated,info=super().step(action);info['deaths']=0
+                    info['timing']={'applied_action':action,'observation_age_seconds':.01,
+                                    'input_send_seconds':.001,'sample_read_seconds':.002}
                     return deepcopy(obs),reward,done,truncated,info
                 def __enter__(self):return self
                 def __exit__(self,*args):return False
@@ -75,6 +141,68 @@ class LaserEvaluationTests(unittest.TestCase):
             self.assertTrue(altrows[0]['external_candidate_gate'])
             self.assertEqual(altrows[0]['candidate_slack'],4.)
             self.assertEqual(before,hashlib.sha256((checkpoint/'model.zip').read_bytes()).hexdigest())
+
+            self.assertNotIn('planner_shadow',altrows[0])
+            baseline_steps=[r for r in altrows if r['event']=='transition']
+            out_index=args.index(str(alternative))
+            args.append('')
+            for flag, expected in (('--planner-shadow', SHADOW_CONFIG), ('--planner-buffered-shadow', BUFFERED_LEAF_CONFIG)):
+                shadow=root/(expected['contract']+'.jsonl')
+                args[out_index]=str(shadow)
+                args[-1]=flag
+                with patch('sys.argv',args),patch('env.windows.connect',return_value=(reader,1,'test-build')), \
+                        patch('env.windows.WindowsKeyboard',return_value=FakeKeyboard()), \
+                        patch('env.laser_session.LaserReader',side_effect=lambda r,b:r), \
+                        patch('env.laser_session.LaserSession',return_value=Task(length=4)), \
+                        contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):evaluate()
+                shadow_rows=[json.loads(line)for line in shadow.read_text().splitlines()]
+                self.assertEqual(shadow_rows[0]['planner_shadow'],expected)
+                shadow_steps=[r for r in shadow_rows if r['event']=='transition']
+                self.assertEqual([r['action'] for r in shadow_steps],[r['action'] for r in baseline_steps])
+                buffered = expected == BUFFERED_LEAF_CONFIG
+                self.assertEqual(['planner_shadow' in r for r in shadow_steps],
+                                 [True] * 8 if buffered else [True,False,True,False]*2)
+                if buffered:
+                    self.assertTrue(all(r['observation']==previous['next_observation']
+                                        for previous,r in zip(shadow_steps,shadow_steps[1:])
+                                        if previous['episode']==r['episode']))
+                    self.assertIn('json_write_seconds',shadow_steps[1]['previous_trace_timing'])
+                report=analyze(shadow)
+                self.assertEqual(report['episodes'][0]['counts']['shadow_samples'],4 if buffered else 2)
+                timings=report['episodes'][1]['timing_ms']
+                self.assertAlmostEqual(timings['fresh_observation_to_send_complete']['p95'],11.)
+                self.assertAlmostEqual(timings['fresh_capture_to_send_complete']['p95'],13.)
+                self.assertEqual(timings['fresh_capture_to_send_complete']['count'],1)
+                self.assertEqual(before,hashlib.sha256((checkpoint/'model.zip').read_bytes()).hexdigest())
+
+            cached=root/'cached.jsonl'
+            args[out_index]=str(cached)
+            args[-1]='--planner-cache-shadow'
+            reader.frame=lambda:9
+            Task.sample=SimpleNamespace(frame=9)
+            Task.sample_received_at=property(lambda _:time.perf_counter())
+            with patch('sys.argv',args),patch('env.windows.connect',return_value=(reader,1,'test-build')), \
+                    patch('env.windows.WindowsKeyboard',return_value=FakeKeyboard()), \
+                    patch('env.laser_session.LaserReader',side_effect=lambda r,b:r), \
+                    patch('env.laser_session.LaserSession',return_value=Task(length=4)), \
+                    contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):evaluate()
+            cached_rows=[json.loads(line)for line in cached.read_text().splitlines()]
+            cached_steps=[r for r in cached_rows if r['event']=='transition']
+            self.assertEqual([r['action'] for r in cached_steps],[r['action'] for r in baseline_steps])
+            self.assertTrue(all(not r['planner_cached']['search_attempted'] for r in cached_steps if r['commitment_active']))
+            self.assertEqual(analyze(cached)['planner_cache']['mode'],'shadow')
+            self.assertEqual(before,hashlib.sha256((checkpoint/'model.zip').read_bytes()).hexdigest())
+
+    def test_partition_waits_for_full_activation(self):
+        def state(phases):
+            return {'player': [0., .5, 0., 0.], 'lasers': encode_lasers([laser(phase) for phase in phases])}
+
+        samples = [(10, state([0, 0])), (12, state([1, 0])), (14, state([1, 1]))]
+        self.assertIsNone(first_partition(samples[:2])['full_activation_frame'])
+        room = first_partition(samples)
+        self.assertEqual(room['full_activation_frame'], 14)
+        self.assertEqual(room['active_lasers'], 2)
+        self.assertGreater(room['area_pixels2'], 0)
 
     def test_evaluation_policy_matches_intrinsic_deterministic_mode(self):
         import gymnasium as gym
