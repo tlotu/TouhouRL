@@ -13,9 +13,79 @@ from agent.replay_connectivity import component_area, contraction
 from agent.replay_hrl import FEATURES, ReplayEpisode, ReplayManagerEnv, ReplaySample, ReplayWorker, rebase, routes_contract
 from agent.short_planner import LONG_HORIZON, plan
 from scripts.evaluate_replay_escape_gate import ContractionGate
+from scripts.audit_training_escape import fork_env, physical_trace
+from scripts.train_replay_mixed_windows import MixedWindows, paired_summary, restore, summarize
 
 
 class ReplayManagerTests(unittest.TestCase):
+    def test_paired_training_restores_identical_state_for_opposite_delay(self):
+        snapshot = self.make_env()
+        snapshot.reset(seed=0, options={'episode': 0, 'delay': 1})
+        snapshot.step(3)
+        mixed = MixedWindows([snapshot], [snapshot], delay_sampling='paired')
+        first, _ = mixed.reset(seed=7)
+        group, delay = mixed.group, mixed.env.fixed_delay
+        mixed.step(7)
+        second, _ = mixed.reset()
+        self.assertEqual(mixed.env.fixed_delay, 1 - delay)
+        self.assertEqual(mixed.group, group)
+        self.assertEqual(mixed.env.buffer, snapshot.buffer)
+        self.assertEqual(mixed.env.frame, snapshot.frame)
+        np.testing.assert_array_equal(first, second)
+
+    def test_pair_completion_requires_safe_completion_under_both_delays(self):
+        rows = [dict(source='test', episode=1, start=0, delay=delay, frames=frames,
+                     outcome='trace_end', first_below_padding_frame=contact)
+                for delay, frames, contact in [(0, 12, None), (1, 12, 8)]]
+        self.assertEqual(paired_summary(rows), {'both_safe': 0, 'pairs': 1, 'mean_worst_frames': 12.})
+
+    def test_window_completion_does_not_hide_margin_violation(self):
+        env = self.make_env()
+        rows = [dict(source='test', episode=1, frames=8, history=[], outcome=outcome,
+                     first_below_padding_frame=contact)
+                for outcome, contact in [('window_end', None), ('window_end', 4),
+                                         ('no_verified_route', None)]]
+        result = summarize(env.episodes, rows)
+        self.assertEqual(result['safe_completed'], 1)
+        self.assertEqual(result['outcomes']['window_end'], 2)
+        self.assertEqual(result['below_padding'], 1)
+
+    def test_mixed_windows_reset_history_and_preserve_snapshot_queue(self):
+        snapshot = self.make_env()
+        snapshot.reset(seed=0, options={'episode': 0, 'delay': 1})
+        snapshot.step(3)
+        restored, obs = restore(snapshot)
+        self.assertEqual(restored.start, 4)
+        self.assertEqual(restored.buffer, snapshot.buffer)
+        self.assertEqual(restored.history, [])
+        self.assertEqual(restored.limit, 12)
+        self.assertTrue(restored.attack_reward)
+        mixed = MixedWindows([snapshot], [snapshot])
+        first, _ = mixed.reset(seed=7)
+        group = mixed.group
+        mixed.step(0)
+        again, _ = mixed.reset(seed=7)
+        np.testing.assert_array_equal(first, again)
+        self.assertEqual(mixed.group, group)
+        self.assertEqual(snapshot.frame, 4)
+        self.assertEqual(len(snapshot.history), 1)
+        self.assertEqual(obs.shape, first.shape)
+
+    def test_counterfactual_fork_preserves_queue_and_isolates_rollout(self):
+        env = self.make_env()
+        env.reset(seed=0, options={'episode': 0, 'delay': 1})
+        env.step(3)
+        branch = fork_env(env)
+        self.assertIs(branch.worker, env.worker)
+        self.assertIs(branch.episode, env.episode)
+        self.assertEqual(branch.buffer, env.buffer)
+        self.assertEqual(branch.belief, env.belief)
+        branch.step(7)
+        self.assertEqual(env.frame, 4)
+        self.assertEqual(len(env.history), 1)
+        env.step(7)
+        self.assertEqual(physical_trace(branch.history), physical_trace(env.history))
+
     def test_contraction_gate_checks_lead_and_releases_at_settling_frame(self):
         gate = ContractionGate(0)
         self.assertFalse(gate.update(0, lambda: {'start': 36, 'end': 48, 'reason': 'stable'}))
@@ -24,6 +94,16 @@ class ReplayManagerTests(unittest.TestCase):
         self.assertTrue(gate.update(40, lambda: self.fail('Active window was rescanned')))
         self.assertFalse(gate.update(44, lambda: self.fail('Gate did not release')))
         self.assertFalse(gate.update(48, lambda: {'start': 4, 'end': 400, 'reason': 'capped'}))
+
+    def test_single_gate_releases_policy_but_waits_until_event_ends(self):
+        gate = ContractionGate(0, max_lead=8, one_shot=True)
+        self.assertFalse(gate.update(0, lambda: {'start': 12, 'end': 28, 'reason': 'stable'}))
+        self.assertTrue(gate.update(16, lambda: {'start': 8, 'end': 24, 'reason': 'stable'}))
+        gate.consumed = True
+        self.assertFalse(gate.update(20, lambda: self.fail('Consumed event rescanned')))
+        self.assertFalse(gate.update(40, lambda: self.fail('Cooldown skipped')))
+        self.assertTrue(gate.update(44, lambda: {'start': 4, 'end': 16, 'reason': 'stable'}))
+        self.assertFalse(gate.consumed)
 
     def make_env(self, circle_frame=None):
         recorded = (192., 224.)

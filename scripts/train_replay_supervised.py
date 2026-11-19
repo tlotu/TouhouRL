@@ -71,7 +71,7 @@ def collect(episodes, worker, per_episode):
     data = []
     for index, episode in enumerate(episodes):
         env = ReplayManagerEnv(episodes, worker, verify=True)
-    obs, _ = env.reset(seed=0, options={'episode': index, 'delay': 1})
+        obs, _ = env.reset(seed=0, options={'episode': index, 'delay': 1})
         last = -100
         selected = 0
         while selected < per_episode:

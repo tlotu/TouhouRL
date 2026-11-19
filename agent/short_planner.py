@@ -377,6 +377,35 @@ def plan(scene, goal: TimedGoal | None = None, *, previous_action=0, width=16,
                 ttc_evaluated, tuple(routes))
 
 
+def forced_beams(model, state, actions, delay, width):
+    """Expand independent fixed-first-action beams in one collision batch per layer."""
+    scene = model.scene
+    if not actions or not model.edges([scene.player], [scene.player], 0, 0)[0][0]:
+        return {}, 0
+    origin = np.asarray(scene.player)
+    roots = [Route((0, 0, 0, 0), scene.player, heading=state.requested, buffer=state)]
+    checked = 0
+    def score(route):
+        return _score(route, None, 0.)
+    for frame in range(0, SHORT_HORIZON, HOLD):
+        # Report the same logical edge count as independent searches.
+        checked += len(DIRECTIONS) * (len(actions) if frame == 0 else len(roots))
+        following = {a: {} for a in actions}
+        for r in _expand(model, roots, origin, scene.speed * HOLD, frame, None, delay, lambda: False):
+            group = following.get(r.actions[0])
+            if group is None:
+                continue
+            key = r.offset, r.heading, r.buffer
+            if key not in group or score(r) > score(group[key]):
+                group[key] = r
+        beams = {a: _keep_diverse(group.values(), width, score, origin, None)
+                 for a, group in following.items() if group}
+        roots = [r for routes in beams.values() for r in routes]
+        if not roots:
+            break
+    return beams, checked
+
+
 def _expand(model, batch, origin, step, frame, goal, switch_delay, expired):
     starts = np.repeat(np.array([route.point for route in batch]), len(DIRECTIONS), axis=0)
     roots = np.array([route.offset for route in batch])

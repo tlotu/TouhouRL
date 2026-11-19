@@ -10,8 +10,30 @@ from agent.direction_buffer import DirectionBuffer
 from agent.forward_model import Circle, ForwardModel, Scene, TimedLaser
 from agent.short_planner import HOLD, LONG_HORIZON, SHORT_HORIZON, SearchBudget, exit_hint, plan, route_points
 from agent.swept_collision import SweptCollision
+from agent.short_planner import forced_beams
 from agent.timed_planner import TimedGoal
 from scripts.probe_short_planning import _rollout, benchmark_cases
+
+
+class ForcedBeamTests(unittest.TestCase):
+    def test_blocked_directions_do_not_consume_other_beams(self):
+        scene = Scene((8., 30.), lasers=(TimedLaser(20., 0., 20., 60., 2., 6., 30.),))
+        state = DirectionBuffer()
+        actions = [1, 3, 7]
+        for delay in (0, 1):
+            grouped, checked = forced_beams(SweptCollision(scene), state, actions, delay, 9)
+            expected = {}
+            edges = 0
+            for action in actions:
+                result = plan(scene, width=9, ttc_weight=0., input_buffer=state,
+                              switch_delay=delay, first_action=action)
+                edges += result.checked_edges
+                full = [r for r in result.candidates if len(r.motion) == SHORT_HORIZON]
+                if full:
+                    expected[action] = full
+            self.assertIn(1, expected)
+            self.assertNotIn(7, expected)
+            self.assertEqual((grouped, checked), (expected, edges))
 
 
 class SweptCollisionTests(unittest.TestCase):

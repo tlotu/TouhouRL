@@ -10,7 +10,7 @@ import torch
 
 from agent.replay_connectivity import forecast_horizon
 from agent.replay_hrl import HOLD, ReplayManagerEnv, ReplayWorker, rebase
-from scripts.train_replay_hrl import BASE, DIAGNOSTICS, TEST, PPO, PPOBackend
+from scripts.train_replay_hrl import BASE, DIAGNOSTICS, TEST, TRAIN, PPO, PPOBackend
 from scripts.train_replay_hrl import attack_position_summary, digest, load_capture
 
 
@@ -22,18 +22,22 @@ MAX_LEAD = 32
 class ContractionGate:
     next_scan: int
     until: int | None = None
+    max_lead: int = MAX_LEAD
+    one_shot: bool = False
+    consumed: bool = False
 
     def update(self, frame, forecast):
         if self.until is not None and frame < self.until:
-            return True
+            return not (self.one_shot and self.consumed)
         self.until = None
         if frame < self.next_scan:
             return False
         self.next_scan = frame + SCAN_INTERVAL
         event = forecast()
         if (event is None or event['reason'] == 'capped'
-                or not 0 <= event['start'] <= MAX_LEAD or event['end'] <= 0):
+                or not 0 <= event['start'] <= self.max_lead or event['end'] <= 0):
             return False
+        self.consumed = False
         self.until = frame + event['end']
         self.next_scan = self.until + HOLD
         return True
@@ -42,11 +46,13 @@ class ContractionGate:
 class GatedReplayEnv(ReplayManagerEnv):
     """Keep the original waypoint interface except during a forecast contraction."""
 
-    def __init__(self, episodes, worker):
+    def __init__(self, episodes, worker, max_lead=MAX_LEAD, one_shot=False):
+        self.max_lead = max_lead
+        self.one_shot = one_shot
         super().__init__(episodes, worker, verify=True)
 
     def reset(self, *, seed=None, options=None):
-        self.gate = ContractionGate((options or {}).get('frame', 0))
+        self.gate = ContractionGate((options or {}).get('frame', 0), max_lead=self.max_lead, one_shot=self.one_shot)
         self.scans = []
         return super().reset(seed=seed, options=options)
 
@@ -72,8 +78,8 @@ class GatedReplayEnv(ReplayManagerEnv):
         return self._observation(rebased, sample)
 
 
-def evaluate(episodes, worker, old, inside, cases):
-    env = GatedReplayEnv(episodes, worker)
+def evaluate(episodes, worker, old, inside, cases, max_lead=MAX_LEAD, one_shot=False):
+    env = GatedReplayEnv(episodes, worker, max_lead, one_shot)
     rows = []
     for case in cases:
         obs, _ = env.reset(seed=0, options=case)
@@ -87,6 +93,8 @@ def evaluate(episodes, worker, old, inside, cases):
                 active_frames.append(env.frame)
                 if env.choices and env.choices[slot].route.actions[0] != env.choices[0].route.actions[0]:
                     switched.append(env.frame)
+            if active:
+                env.gate.consumed = True
             obs, _, done, _, info = env.step(slot)
             if done:
                 break
@@ -105,13 +113,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--old', type=Path, required=True)
     parser.add_argument('--escape', type=Path, required=True)
+    parser.add_argument('--train-ablation', action='store_true')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():
         parser.error('--output already exists')
     torch.set_num_threads(1)
-    sources = {str(path): digest(path) for path in (BASE, TEST, args.old, args.escape)}
-    episodes = load_capture(TEST, sources[str(BASE)])
+    captures = TRAIN if args.train_ablation else [TEST]
+    sources = {str(path): digest(path) for path in (BASE, *captures, args.old, args.escape)}
+    episodes = [ep for path in captures for ep in load_capture(path, sources[str(BASE)])]
     backend = PPOBackend.__new__(PPOBackend)
     backend.model = PPO.load(BASE, device='cpu')
     worker = ReplayWorker(backend.action_logits, prune_failed=True)
@@ -121,10 +131,18 @@ def main():
              'early': [{'episode': 2, 'frame': f, 'delay': d} for f in DIAGNOSTICS[:3] for d in (0, 1)]}
     report = {'sources': sources, 'scan_interval_frames': SCAN_INTERVAL, 'max_lead_frames': MAX_LEAD,
               'evaluations': {}}
-    for label, policy in [('old_in_gate', old), ('escape_in_gate', escape)]:
+    variants = [('old_in_gate', old, 32, False), ('escape_in_gate', escape, 32, False)]
+    if args.train_ablation:
+        cases.pop('early')
+        variants += [(f'{name}_lead{lead}_single', policy, lead, True)
+                     for lead in (32, 16, 8) for name, policy in [('old', old), ('escape', escape)]]
+        variants += [('escape_lead8_window', escape, 8, False)]
+    report['split'] = 'train' if args.train_ablation else 'held_out'
+    for label, policy, lead, single in variants:
         report['evaluations'][label] = {}
         for group, trials in cases.items():
-            result = evaluate(episodes, worker, old, policy, trials)
+            result = evaluate(episodes, worker, old, policy, trials, lead, single)
+            result.update(max_lead=lead, one_shot=single)
             report['evaluations'][label][group] = result
             print(label, group, f"{result['completed']}/{result['total']}",
                   f"{result['mean_frames']:.1f} frames", flush=True)

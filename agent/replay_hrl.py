@@ -9,7 +9,7 @@ import numpy as np
 
 from .boundary_control import feasible_actions
 from .forward_model import ForwardModel
-from .short_planner import ANGLES, HOLD, SHORT_HORIZON, TTC_HORIZON, VECTORS, Route, SearchBudget, plan
+from .short_planner import ANGLES, HOLD, SHORT_HORIZON, TTC_HORIZON, VECTORS, Route, SearchBudget, forced_beams, plan
 from .swept_collision import SweptCollision
 
 
@@ -207,15 +207,16 @@ class ReplayWorker:
         if by_direction or waypoint_coverage:
             covered = {route.actions[0] for route, _, _ in routes}
             extra = {}
-            for action in sorted(set(allowed) - covered):
-                for delay in (0, 1):
-                    result = plan(padded, previous_action=state.requested, width=WIDTH, smooth=False,
-                                  input_buffer=state, switch_delay=delay, ttc_weight=0.,
-                                  collision_model=collision, first_action=action)
-                    edges += result.checked_edges
-                    for route in result.candidates:
-                        if len(route.actions) * HOLD == SHORT_HORIZON:
-                            extra.setdefault(route.actions, route)
+            missing = sorted(set(allowed) - covered)
+            beams = []
+            for delay in (0, 1):
+                groups, checked = forced_beams(collision, state, missing, delay, WIDTH)
+                beams.append(groups)
+                edges += checked
+            for action in missing:
+                for groups in beams:
+                    for route in groups.get(action, ()):
+                        extra.setdefault(route.actions, route)
             routes.extend(robust_routes(padded, belief, tuple(extra.values()), allowed, collision,
                                         prune_failed=True))
             directions = self._rank(scene, observation, routes, by_direction=True)
