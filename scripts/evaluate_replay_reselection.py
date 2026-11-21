@@ -13,9 +13,9 @@ import torch
 from agent.boundary_control import feasible_actions
 from agent.replay_hrl import HOLD, PADDING, SHORT_HORIZON, ReplayWorker, rebase
 from agent.short_planner import VECTORS
-from agent.swept_collision import SweptCollision
+from agent.swept_collision import SweptCollision, UniqueSweeps
 from scripts.audit_replay_first_hold_update import mean_frames, slot_for
-from scripts.audit_replay_replanning_scores import forecast
+from scripts.audit_replay_replanning_scores import forecast_candidates
 from scripts.audit_replay_terminal_routes import feasible_prefixes
 from scripts.audit_training_escape import physical_trace
 from scripts.diagnose_replay_mixed_windows import predict
@@ -39,8 +39,10 @@ class CountState:
 def count_routes(state):
     # The cap clips reported clearances, but leaves collision validity unchanged.
     for _, counts in feasible_prefixes(state.scene, state.belief, (0, 1), PADDING,
-                                      final_counts=True, batch_size=1024,
-                                      model_factory=lambda scene: SweptCollision(scene, clearance_cap=1e-6)):
+                                      final_counts=True, batch_size=1024, prune_failed=True, reuse_edges=True,
+                                      vector_terminal=True,
+                                      model_factory=lambda scene: SweptCollision(
+                                          scene, clearance_cap=1e-6, cull_batches=True)):
         pass
     return sum(counts[a] for a in state.allowed)
 
@@ -84,22 +86,45 @@ def primitive_profile(state, horizon):
     return routes, scores
 
 
-def choose(env, policy, worker, nominal, horizon, actions=None):
+def choose(env, policy, worker, nominal, horizon, actions=None, *, stop_at_horizon=False, pruned=None):
     if actions is None:
         actions = sorted({choice.route.actions[0] for choice in env.choices})
     if len(actions) == 1:
-        return nominal, {}
+        return nominal, {}, 0
+    if stop_at_horizon or pruned is not None:
+        actions = [nominal, *(a for a in actions if a != nominal)]
+    max_frames = ((horizon + HOLD - 1) // HOLD) * HOLD
     scores = {}
-    for action in actions:
-        result = forecast(env, action, worker, horizon, policy)
+    calls = 0
+
+    def rank(action, score):
+        return score, action == nominal, -action
+
+    def can_win(action, ceiling):
+        if action == nominal or nominal not in scores:
+            return True
+        if rank(action, ceiling) > max(rank(a, s) for a, s in scores.items()):
+            return True
+        pruned[action] = ceiling
+        return False
+
+    kwargs = {'can_win': can_win} if pruned is not None else {}
+    for action, result in forecast_candidates(env, actions, worker, horizon, policy, **kwargs):
+        calls += 1
+        if result is None:
+            continue
         if all(branch['frames'] >= HOLD for branch in result['branches']):
             scores[action] = mean_frames(result)
+            if stop_at_horizon and action == nominal and scores[action] == max_frames:
+                # The nominal action wins ties and no branch can exceed this score.
+                return nominal, scores, calls
     if nominal not in scores:
-        return nominal, scores
-    return max(scores, key=lambda action: (scores[action], action == nominal, -action)), scores
+        return nominal, scores, calls
+    return max(scores, key=lambda action: rank(action, scores[action])), scores, calls
 
 
-def drive(env, obs, policy, worker, method='rollout', *, profile=False):
+def drive(env, obs, policy, worker, method='rollout', *, profile=False, stop_at_horizon=False,
+          prune_forecast_branches=False):
     previous = previous_count = None
     followup = False
     events, decision_ms = [], []
@@ -132,6 +157,8 @@ def drive(env, obs, policy, worker, method='rollout', *, profile=False):
             horizon = 60 - HOLD if recheck else 60
             offered = sorted({c.route.actions[0] for c in env.choices})
             shortlisted = offered
+            forecast_calls = 0
+            pruned = {} if prune_forecast_branches else None
             scoring_started = perf_counter()
             if method == 'primitive':
                 if primitive_scores is None or recheck:
@@ -146,9 +173,13 @@ def drive(env, obs, policy, worker, method='rollout', *, profile=False):
                 if timer:
                     with timer.options(worker):
                         timed_choose = timer.timed(choose, 'forecast_selection')
-                        action, scores = timed_choose(env, policy, worker, nominal, horizon, shortlisted)
+                        action, scores, forecast_calls = timed_choose(
+                            env, policy, worker, nominal, horizon, shortlisted,
+                            stop_at_horizon=stop_at_horizon, pruned=pruned)
                 else:
-                    action, scores = choose(env, policy, worker, nominal, horizon, shortlisted)
+                    action, scores, forecast_calls = choose(
+                        env, policy, worker, nominal, horizon, shortlisted,
+                        stop_at_horizon=stop_at_horizon, pruned=pruned)
             scoring_ms = (perf_counter() - scoring_started) * 1000
             if action != nominal:
                 slot = slot_for(env, action)
@@ -157,9 +188,13 @@ def drive(env, obs, policy, worker, method='rollout', *, profile=False):
                            'previous_routes': previous_count, 'current_routes': current_count,
                            'nominal': nominal, 'selected': action, 'mean_frames': scores,
                            'offered_actions': offered, 'shortlisted_actions': shortlisted,
-                           'forecast_calls': len(shortlisted) if method != 'primitive' and len(shortlisted) > 1 else 0,
+                           'forecast_calls': forecast_calls,
                            'scoring_ms': scoring_ms,
                            'selection_ms': (perf_counter() - started) * 1000})
+            if stop_at_horizon and 0 < forecast_calls < len(shortlisted):
+                events[-1]['skipped_forecasts'] = [move for move in shortlisted if move != nominal]
+            if pruned:
+                events[-1]['pruned_forecasts'] = pruned
         decision_ms.append((perf_counter() - started) * 1000)
         if timer:
             phase_rows.append({'frame': env.frame, **timer.take()})
@@ -186,6 +221,10 @@ def main():
     parser.add_argument('--policy', choices=('old', 'paired'))
     parser.add_argument('--method', choices=('rollout', 'primitive', 'hybrid'), default='rollout')
     parser.add_argument('--profile', action='store_true', help='Record per-decision component timings.')
+    parser.add_argument('--stop-at-horizon', action='store_true',
+                        help='Skip other forecasts when the nominal action reaches the scoring horizon.')
+    parser.add_argument('--prune-forecast-branches', action='store_true',
+                        help='Stop a candidate once its optimistic score cannot win.')
     args = parser.parse_args()
     if args.output.exists():
         parser.error('--output already exists')
@@ -202,7 +241,7 @@ def main():
     backend = PPOBackend.__new__(PPOBackend)
     backend.model = PPO.load(BASE, device='cpu')
     actual = ReplayWorker(backend.action_logits, prune_failed=True)
-    projected = ReplayWorker(lambda obs: np.zeros(9), prune_failed=True)
+    projected = ReplayWorker(lambda obs: np.zeros(9), prune_failed=True, collision_factory=UniqueSweeps)
     policies = {name: PPO.load(p, device='cpu') for name, p in paths.items()}
     cases = []
     for anchor in report['anchors']:
@@ -223,7 +262,9 @@ def main():
                 branch, obs = restore(env, duration=None)
                 branch.fixed_delay = reference['delay']
                 print('Start', anchor['source'], name, reference['delay'], flush=True)
-                result = drive(branch, obs, policies[name], projected, args.method, profile=args.profile)
+                result = drive(branch, obs, policies[name], projected, args.method, profile=args.profile,
+                               stop_at_horizon=args.stop_at_horizon,
+                               prune_forecast_branches=args.prune_forecast_branches)
                 baseline = compact(reference, episodes)
                 changes = [event for event in result['events'] if event['selected'] != event['nominal']]
                 first = changes[0]['frame'] if changes else branch.frame + 1
@@ -241,7 +282,9 @@ def main():
     with args.output.open('x', encoding='utf-8') as stream:
         json.dump({'sources': sources, 'drop_fraction': .5, 'danger_gate': True, 'method': args.method,
                    'trigger_forecast_frames': 60, 'followup_forecast_frames': 56,
-                   'timing_excludes_normal_environment_step': True, 'cases': cases},
+                   'timing_excludes_normal_environment_step': True, 'stop_at_horizon': args.stop_at_horizon,
+                   'prune_forecast_branches': args.prune_forecast_branches,
+                   'cases': cases},
                   stream, indent=2, allow_nan=False)
         stream.write('\n')
 

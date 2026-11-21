@@ -20,10 +20,24 @@ from scripts.train_replay_mixed_windows import CoverageEnv, restore
 def forecast(origin, action, worker, horizon=60, policy=None, *, sample=None, reuse_options=True):
     if sample is None:
         sample = origin.episode.samples[origin.frame]
+    return _forecast(origin, action, worker, horizon, policy, sample, {} if reuse_options else None)
+
+
+def forecast_candidates(origin, actions, worker, horizon, policy=None, *, can_win=None):
+    """Share deterministic choices across candidates from one observation."""
+    sample = origin.episode.samples[origin.frame]
+    options = {}
+    for action in actions:
+        yield action, _forecast(origin, action, worker, horizon, policy, sample, options, can_win=can_win)
+
+
+def _forecast(origin, action, worker, horizon, policy, sample, options, *, can_win=None):
     observation = sample.observation
     view = copy(origin)
     branches = []
-    options = {}
+    branch_count = 2 * len(origin.belief)
+    horizon_cap = ((horizon + HOLD - 1) // HOLD) * HOLD
+    finished_frames = 0
     for initial in sorted(origin.belief, key=lambda q: (q.requested, q.applied, q.pending)):
         for delay in (0, 1):
             scene, queue, belief = origin.scene, initial, origin.belief
@@ -32,10 +46,13 @@ def forecast(origin, action, worker, horizon=60, policy=None, *, sample=None, re
             while elapsed < horizon:
                 # Within this forecast, elapsed time fixes every hazard's geometry.
                 key = elapsed, tuple(scene.player), belief
-                if not reuse_options or key not in options:
-                    options[key], _, _ = worker.options(scene, rebase(observation, scene.player), belief,
-                                                        waypoint_coverage=True)
-                choices = options[key]
+                if options is not None and key in options:
+                    choices = options[key]
+                else:
+                    choices, _, _ = worker.options(scene, rebase(observation, scene.player), belief,
+                                                    waypoint_coverage=True)
+                    if options is not None:
+                        options[key] = choices
                 if not choices:
                     break
                 if first and action is not None:
@@ -62,6 +79,12 @@ def forecast(origin, action, worker, horizon=60, policy=None, *, sample=None, re
                 elapsed += HOLD
                 requests.append(move)
             branches.append({'delay': delay, 'frames': elapsed, 'requests': requests})
+            finished_frames += elapsed
+            remaining = branch_count - len(branches)
+            if can_win is not None and remaining:
+                ceiling = (finished_frames + remaining * horizon_cap) / branch_count
+                if not can_win(action, ceiling):
+                    return None
     return {'branches': branches, 'worst_frames': min(b['frames'] for b in branches)}
 
 

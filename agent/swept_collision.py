@@ -20,23 +20,33 @@ def _boxes(starts, ends, radius):
     return np.minimum(starts, ends) - padding, np.maximum(starts, ends) + padding
 
 
-def _overlap_pairs(starts, ends, boxes):
+def _overlap_pairs(starts, ends, boxes, *, cull_batch=False):
     low, high = np.minimum(starts, ends), np.maximum(starts, ends)
     box_low, box_high = boxes
-    return np.nonzero(
+    kept = None
+    if cull_batch and len(low) >= 32 and len(box_low):
+        # Every individual sweep is contained by this batch bounding box.
+        envelope_low, envelope_high = low.min(axis=0), high.max(axis=0)
+        intersects = ((box_low <= envelope_high) & (box_high >= envelope_low)).all(axis=1)
+        if not intersects.all():
+            kept = np.flatnonzero(intersects)
+            box_low, box_high = box_low[kept], box_high[kept]
+    edges, hazards = np.nonzero(
         (low[:, None, 0] <= box_high[:, 0]) & (high[:, None, 0] >= box_low[:, 0])
         & (low[:, None, 1] <= box_high[:, 1]) & (high[:, None, 1] >= box_low[:, 1])
     )
+    return edges, hazards if kept is None else kept[hazards]
 
 
 class SweptCollision(ForwardModel):
     """Match the reference validity and its clearance clipped at clearance_cap."""
 
-    def __init__(self, scene, clearance_cap=24.):
+    def __init__(self, scene, clearance_cap=24., *, cull_batches=False):
         super().__init__(scene)
         if not np.isfinite(clearance_cap) or clearance_cap <= 0:
             raise ValueError("Invalid clearance cap")
         self.clearance_cap = clearance_cap
+        self.cull_batches = cull_batches
         self.counts = CollisionCounts()
         self._layers = {}
         self._lasers = np.array([(l.ax, l.ay, l.bx, l.by, l.width / 2 + scene.player_radius,
@@ -69,14 +79,14 @@ class SweptCollision(ForwardModel):
         moves = ends - starts
         center, circle_boxes, lasers, laser_boxes = self._layer(frame, duration)
         self.counts.potential_pairs += len(starts) * (len(center) + len(lasers))
-        edge, circle = _overlap_pairs(starts, ends, circle_boxes)
+        edge, circle = _overlap_pairs(starts, ends, circle_boxes, cull_batch=self.cull_batches)
         self.counts.checked_pairs += len(edge)
         if len(edge):
             velocity = moves[edge] / duration if duration else 0.
             values = _circle_gaps(center[circle] - starts[edge], self.circles[circle, 2:4] - velocity,
                                   self._radii[circle], duration)
             np.minimum.at(gaps, indices[edge], values)
-        edge, laser = _overlap_pairs(starts, ends, laser_boxes)
+        edge, laser = _overlap_pairs(starts, ends, laser_boxes, cull_batch=self.cull_batches)
         self.counts.checked_pairs += len(edge)
         if len(edge):
             beams = lasers[laser]
@@ -134,3 +144,19 @@ class SweptCollision(ForwardModel):
             hit = _segment_distance(starts[edge], ends[edge], rows[:, :2], rows[:, 2:4]) <= rows[:, 4]
             valid[edge[hit]] = False
         return valid
+
+
+class UniqueSweeps(SweptCollision):
+    """Evaluate identical edges once per batch and restore the original order."""
+
+    def edges(self, starts, ends, frame, duration):
+        if not (isinstance(starts, np.ndarray) and isinstance(ends, np.ndarray)
+                and starts.dtype == ends.dtype == np.dtype(float)
+                and starts.ndim == 2 and starts.shape[1] == 2
+                and starts.shape == ends.shape and len(starts) >= 32):
+            return super().edges(starts, ends, frame, duration)
+        rows = np.column_stack((starts, ends))
+        keys = rows.view(np.dtype((np.void, rows.strides[0]))).ravel()
+        _, unique, inverse = np.unique(keys, return_index=True, return_inverse=True)
+        valid, gaps = super().edges(starts[unique], ends[unique], frame, duration)
+        return valid[inverse], gaps[inverse]

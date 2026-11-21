@@ -37,6 +37,21 @@ class ForcedBeamTests(unittest.TestCase):
 
 
 class SweptCollisionTests(unittest.TestCase):
+    def test_batch_culling_preserves_clearance_and_crossing_lasers(self):
+        scene = Scene((20., 20.), circles=(Circle(25., 25., -2., 0., 2.), Circle(90., 90., 0., 0., 1.)),
+                      lasers=(TimedLaser(0., 24., 100., 24., 2., 2., 10.),
+                              TimedLaser(0., 80., 100., 80., 2., 0., 10.)),
+                      bounds=(0., 100., 0., 100.))
+        starts = np.column_stack((np.linspace(15., 35., 64), np.full(64, 20.)))
+        ends = starts + (0., 8.)
+        reference = SweptCollision(scene, clearance_cap=4.)
+        culled = SweptCollision(scene, clearance_cap=4., cull_batches=True)
+        for frame in (0, 2, 10):
+            expected = reference.edges(starts, ends, frame, 4)
+            actual = culled.edges(starts, ends, frame, 4)
+            for values, result in zip(expected, actual):
+                np.testing.assert_array_equal(values, result)
+
     def test_far_fast_circle_and_spanning_laser_survive_culling(self):
         circle = Circle(100., 20., -20., 0., 2.)
         laser = TimedLaser(24., -200., 24., 200., 1., 2., 12.)

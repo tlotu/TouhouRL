@@ -161,10 +161,11 @@ class Choice:
 class ReplayWorker:
     """Frozen actor and deterministic short search shared by all managers."""
 
-    def __init__(self, logits, *, early_exit=False, prune_failed=False):
+    def __init__(self, logits, *, early_exit=False, prune_failed=False, collision_factory=SweptCollision):
         self.logits = logits
         self.early_exit = early_exit
         self.prune_failed = prune_failed
+        self.collision_factory = collision_factory
 
     def _direct_routes(self, scene, state, allowed, belief, collision):
         """Try sustained directions before expanding a beam in open space."""
@@ -181,7 +182,7 @@ class ReplayWorker:
     def options(self, scene, observation, belief, *, by_direction=False, waypoint_coverage=False):
         started = time.perf_counter()
         padded = replace(scene, player_radius=scene.player_radius + PADDING)
-        collision = SweptCollision(padded)
+        collision = self.collision_factory(padded)
         proposals = {}
         # One representative queue generates candidates. The full belief is used
         # for verification, so additional queue states can only remove candidates.

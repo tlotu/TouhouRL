@@ -17,8 +17,77 @@ from scripts.train_replay_hrl import BASE, TRAIN, PPO, PPOBackend, digest, load_
 from scripts.train_replay_mixed_windows import CoverageEnv, restore
 
 
+def _check_edges(collision, starts, ends, moves, frame, reuse_edges):
+    if not reuse_edges:
+        return collision.edges(starts, ends, frame, 1)
+    # A start and move uniquely determine the sweep at this time layer.
+    rows = np.column_stack((starts, moves))
+    keys = rows.view(np.dtype((np.void, rows.strides[0]))).ravel()
+    _, unique, inverse = np.unique(keys, return_index=True, return_inverse=True)
+    safe, gaps = collision.edges(starts[unique], ends[unique], frame, 1)
+    return safe[inverse], gaps[inverse]
+
+
+def _sweep_hold(starts, moves, models, speed, delay_count, *, prune_failed, reuse_edges, track_clearance):
+    legal = np.ones(len(starts), dtype=bool)
+    clearances = np.full(len(starts), np.inf) if track_clearance else None
+    by_request = legal.reshape(-1, delay_count)
+    for offset, (collision, frame) in enumerate(models):
+        movement = moves[:, offset]
+        ends = starts + speed * VECTORS[movement]
+        if prune_failed and not legal.all():
+            live = np.flatnonzero(legal)
+            if not len(live):
+                break
+        else:
+            live = slice(None)
+        safe, distances = _check_edges(collision, starts[live], ends[live], movement[live], frame, reuse_edges)
+        legal[live] &= safe
+        if clearances is not None:
+            clearances[live] = np.minimum(clearances[live], distances)
+        if prune_failed and not safe.all():
+            # A request is safe only if every possible delay is safe.
+            by_request &= by_request.all(axis=1, keepdims=True)
+        starts = ends
+    return starts, by_request.all(axis=1), clearances
+
+
+def _terminal_masks(states, delays, models, speed, batch_size, prune_failed, reuse_edges):
+    """Compute final legal actions without constructing request or endpoint objects."""
+    states = tuple(states)
+    count = len(VECTORS)
+    masks = {}
+    motion_table = {queue: [queue.advance(a, HOLD, delay)[0] for a in range(count) for delay in delays]
+                    for queue in {queue for _, queue in states}}
+    per_batch = max(1, batch_size // count)
+    weights = 1 << np.arange(count)
+    for begin in range(0, len(states), per_batch):
+        batch = states[begin:begin + per_batch]
+        starts = np.repeat(np.asarray([point for point, _ in batch]), count * len(delays), axis=0)
+        moves = np.asarray([motion_table[queue] for _, queue in batch]).reshape(-1, HOLD)
+        _, safe, _ = _sweep_hold(starts, moves, models, speed, len(delays),
+                                 prune_failed=prune_failed, reuse_edges=reuse_edges, track_clearance=False)
+        masks.update(zip(batch, (safe.reshape(-1, count) @ weights).tolist()))
+    return masks
+
+
+def _count_final(frontier, masks):
+    counts = [0] * len(VECTORS)
+    for prefix, endpoints, _ in frontier:
+        mask = (1 << len(VECTORS)) - 1
+        for endpoint in endpoints:
+            mask &= masks[endpoint]
+        if prefix:
+            counts[prefix[0]] += mask.bit_count()
+        else:
+            for action in range(len(VECTORS)):
+                counts[action] += (mask >> action) & 1
+    return counts
+
+
 def feasible_prefixes(scene, queues, delays, padding, observations=None, *, model_factory=ForwardModel,
-                      final_counts=False, batch_size=128):
+                      final_counts=False, batch_size=128, prune_failed=False, reuse_edges=False,
+                      vector_terminal=False):
     """Enumerate every request sequence, rejecting only unsafe movement branches."""
     model = model_factory(replace(scene, player_radius=scene.player_radius + padding))
     models = ([(model_factory(replace(sample, player_radius=sample.player_radius + padding)), offset)
@@ -27,44 +96,39 @@ def feasible_prefixes(scene, queues, delays, padding, observations=None, *, mode
     frontier = [((), [(scene.player, queue) for queue in queues], float('inf'))]
     for elapsed in range(0, len(models), HOLD):
         states = dict.fromkeys(state for _, endpoints, _ in frontier for state in endpoints)
+        hold_models = models[elapsed:elapsed + HOLD]
+        count_layer = final_counts and elapsed + HOLD == len(models)
+        if count_layer and vector_terminal:
+            masks = _terminal_masks(states, delays, hold_models, scene.speed, batch_size, prune_failed, reuse_edges)
+            yield elapsed + HOLD, _count_final(frontier, masks)
+            return
         requests = [(state, action) for state in states for action in range(len(VECTORS))]
         transitions = {}
+        masks = dict.fromkeys(states, 0) if count_layer else None
+        delay_count = len(delays)
         for begin in range(0, len(requests), batch_size):
             batch = requests[begin:begin + batch_size]
             branches = [(point, moves, tail) for (point, queue), action in batch for delay in delays
                         for moves, tail in (queue.advance(action, HOLD, delay),)]
             starts = np.asarray([point for point, _, _ in branches])
             moves = np.asarray([moves for _, moves, _ in branches])
-            legal = np.ones(len(branches), dtype=bool)
-            clearances = np.full(len(branches), np.inf)
-            for offset in range(HOLD):
-                ends = starts + scene.speed * VECTORS[moves[:, offset]]
-                collision, time = models[elapsed + offset]
-                safe, distances = collision.edges(starts, ends, time, 1)
-                legal &= safe
-                clearances = np.minimum(clearances, distances)
-                starts = ends
-            for index, request in enumerate(batch):
-                lo = index * len(delays)
-                hi = lo + len(delays)
-                if legal[lo:hi].all():
+            starts, safe, clearances = _sweep_hold(
+                starts, moves, hold_models, scene.speed, delay_count,
+                prune_failed=prune_failed, reuse_edges=reuse_edges, track_clearance=not count_layer)
+            safe_indices = np.flatnonzero(safe)
+            if count_layer:
+                for index in safe_indices:
+                    state, action = batch[index]
+                    masks[state] |= 1 << action
+            else:
+                for index in safe_indices:
+                    lo = index * delay_count
+                    hi = lo + delay_count
                     endpoints = [(tuple(starts[i]), branches[i][2]) for i in range(lo, hi)]
-                    transitions[request] = endpoints, float(clearances[lo:hi].min())
-        if final_counts and elapsed + HOLD == len(models):
+                    transitions[batch[index]] = endpoints, float(clearances[lo:hi].min())
+        if count_layer:
             # Each bit is one safe request. Intersect across possible input states.
-            masks = {state: sum(1 << a for a in range(len(VECTORS)) if (state, a) in transitions)
-                     for state in states}
-            counts = [0] * len(VECTORS)
-            for prefix, endpoints, _ in frontier:
-                mask = (1 << len(VECTORS)) - 1
-                for endpoint in endpoints:
-                    mask &= masks[endpoint]
-                if prefix:
-                    counts[prefix[0]] += mask.bit_count()
-                else:
-                    for action in range(len(VECTORS)):
-                        counts[action] += (mask >> action) & 1
-            yield elapsed + HOLD, counts
+            yield elapsed + HOLD, _count_final(frontier, masks)
             return
         children = []
         for prefix, states, gap in frontier:
